@@ -1,43 +1,61 @@
-import pdb
 from typing import Optional
 import numpy as np
 import numba
 from diffusion_policy.common.replay_buffer import ReplayBuffer
-
+import pdb
 
 @numba.jit(nopython=True)
 def create_indices(
-    episode_ends:np.ndarray, sequence_length:int, 
+    episode_ends:np.ndarray, sequence_length:int,
     episode_mask: np.ndarray,
     pad_before: int=0, pad_after: int=0,
     debug:bool=True) -> np.ndarray:
     episode_mask.shape == episode_ends.shape
-    left_strat_indices = [0,2,5,6,8,9,11,12,13,14]
     pad_before = min(max(pad_before, 0), sequence_length-1)
     pad_after = min(max(pad_after, 0), sequence_length-1)
+    # import pdb
     # pdb.set_trace()
+    print("len(episode_ends) = ", len(episode_ends))
     indices = list()
+    left_strat_indices = [0,2,5,6,8,9,11,12,13,14]
 
-    for i in range(len(episode_ends)):
+    # for each episode, each demonstration of the task performed successfully
+    for init_i in range(len(episode_ends)):
+        i = init_i
         if not episode_mask[i]:
             # skip episode
             continue
-        if i not in left_strat_indices:
-            i = 0
-
+        # if i not in left_strat_indices:
+        #     i = 0
         start_idx = 0
         if i > 0:
             start_idx = episode_ends[i-1]
-        end_idx = episode_ends[i]
-        episode_length = end_idx - start_idx
-        
+            # begin the start_idx at the start of the full demonstration
+
+        end_idx = episode_ends[i] # this is the end of the trajectory
+        episode_length = end_idx - start_idx # this is how many timesteps were in this demonstration, will vary
+
         min_start = -pad_before
-        max_start = episode_length - sequence_length + pad_after
-        
+        max_start = episode_length - sequence_length + pad_after # this is so that your traj is within the demo
+
+        # buffer_start_idx = 0 + start_idx
+        # buffer_end_idx = end_idx
+        #
+        # indices.append([
+        #     buffer_start_idx, buffer_end_idx,
+        #     start_idx, end_idx])
+
+        # this is if you are doing partial trajectories
         # range stops one idx before end
+        # there are a set of possible starting points, use only these
+        # for idx in range(min_start, max_start+1):
+        # sequence_length = episode_length
         for idx in range(min_start, max_start+1):
+            # buffer start index = start at the current start index (not global) plus the start of this demo-> makes this global
             buffer_start_idx = max(idx, 0) + start_idx
             buffer_end_idx = min(idx+sequence_length, episode_length) + start_idx
+
+            # what is start_offset? start of the segment of this demo - offset. Offset = global start of traj + current start index (not global)
             start_offset = buffer_start_idx - (idx+start_idx)
             end_offset = (idx+sequence_length+start_idx) - buffer_end_idx
             sample_start_idx = 0 + start_offset
@@ -46,12 +64,15 @@ def create_indices(
                 assert(start_offset >= 0)
                 assert(end_offset >= 0)
                 assert (sample_end_idx - sample_start_idx) == (buffer_end_idx - buffer_start_idx)
-            # indices.append([
-            #     buffer_start_idx, buffer_end_idx,
-            #     sample_start_idx, sample_end_idx])
+            # if type(buffer_start_idx) is list:
+            #     print("what is happening here: ", buffer_start_idx)
+            #     continue
             indices.append([
                 int(buffer_start_idx), int(buffer_end_idx),
                 int(sample_start_idx), int(sample_end_idx)])
+
+
+
     indices = np.array(indices)
     return indices
 
@@ -84,8 +105,8 @@ def downsample_mask(mask, max_n, seed=0):
     return train_mask
 
 class SequenceSampler:
-    def __init__(self, 
-        replay_buffer: ReplayBuffer, 
+    def __init__(self,
+        replay_buffer: ReplayBuffer,
         sequence_length:int,
         pad_before:int=0,
         pad_after:int=0,
@@ -102,15 +123,15 @@ class SequenceSampler:
         assert(sequence_length >= 1)
         if keys is None:
             keys = list(replay_buffer.keys())
-        
+
         episode_ends = replay_buffer.episode_ends[:]
         if episode_mask is None:
             episode_mask = np.ones(episode_ends.shape, dtype=bool)
 
         if np.any(episode_mask):
-            indices = create_indices(episode_ends, 
-                sequence_length=sequence_length, 
-                pad_before=pad_before, 
+            indices = create_indices(episode_ends,
+                sequence_length=sequence_length,
+                pad_before=pad_before,
                 pad_after=pad_after,
                 episode_mask=episode_mask
                 )
@@ -118,35 +139,43 @@ class SequenceSampler:
             indices = np.zeros((0,4), dtype=np.int64)
 
         # (buffer_start_idx, buffer_end_idx, sample_start_idx, sample_end_idx)
-        self.indices = indices 
+        self.indices = indices
         self.keys = list(keys) # prevent OmegaConf list performance problem
         self.sequence_length = sequence_length
         self.replay_buffer = replay_buffer
         self.key_first_k = key_first_k
-    
+
     def __len__(self):
         return len(self.indices)
-        
-    def sample_sequence(self, idx):
-        if idx not in self.indices:
-            r_idx = np.random.choice(np.arange(len(self.indices)))
-            idx = self.indices[r_idx]
 
-        buffer_start_idx, buffer_end_idx, sample_start_idx, sample_end_idx \
+    def sample_sequence(self, idx):
+        # import pdb; pdb.set_trace()
+        if idx not in self.indices:
+            idx = np.random.choice(np.arange(len(self.indices)))
+            buffer_start_idx, buffer_end_idx, sample_start_idx, sample_end_idx = self.indices[idx]
+        else:
+            buffer_start_idx, buffer_end_idx, sample_start_idx, sample_end_idx \
             = self.indices[idx]
+        # print("buffer_start_idx, buffer_end_idx, sample_start_idx, sample_end_idx",
+        #       buffer_start_idx, buffer_end_idx, sample_start_idx, sample_end_idx)
         result = dict()
+
         for key in self.keys:
             input_arr = self.replay_buffer[key]
+            # import pdb
+            # pdb.set_trace()
+            # print("input_arr", len(input_arr))
             # performance optimization, avoid small allocation if possible
+            # import pdb; pdb.set_trace()
             if key not in self.key_first_k:
-                sample = input_arr[buffer_start_idx:buffer_end_idx]
+                sample = input_arr[int(buffer_start_idx):int(buffer_end_idx)]
             else:
                 # performance optimization, only load used obs steps
                 n_data = buffer_end_idx - buffer_start_idx
                 k_data = min(self.key_first_k[key], n_data)
                 # fill value with Nan to catch bugs
                 # the non-loaded region should never be used
-                sample = np.full((n_data,) + input_arr.shape[1:], 
+                sample = np.full((n_data,) + input_arr.shape[1:],
                     fill_value=np.nan, dtype=input_arr.dtype)
                 try:
                     sample[:k_data] = input_arr[buffer_start_idx:buffer_start_idx+k_data]
@@ -165,4 +194,41 @@ class SequenceSampler:
             result[key] = data
         return result
 
-
+    def sample_full_sequence(self, idx):
+        if idx not in self.indices:
+            r_idx = np.random.choice(np.arange(len(self.indices)))
+            idx = self.indices[r_idx]
+        buffer_start_idx, buffer_end_idx, sample_start_idx, sample_end_idx \
+            = self.indices[idx]
+        print("buffer_start_idx, buffer_end_idx, sample_start_idx, sample_end_idx",
+              buffer_start_idx, buffer_end_idx, sample_start_idx, sample_end_idx)
+        result = dict()
+        for key in self.keys:
+            input_arr = self.replay_buffer[key]
+            # performance optimization, avoid small allocation if possible
+            if key not in self.key_first_k:
+                sample = input_arr[buffer_start_idx:buffer_end_idx]
+            else:
+                # performance optimization, only load used obs steps
+                n_data = buffer_end_idx - buffer_start_idx
+                k_data = min(self.key_first_k[key], n_data)
+                # fill value with Nan to catch bugs
+                # the non-loaded region should never be used
+                sample = np.full((n_data,) + input_arr.shape[1:],
+                    fill_value=np.nan, dtype=input_arr.dtype)
+                try:
+                    sample[:k_data] = input_arr[buffer_start_idx:buffer_start_idx+k_data]
+                except Exception as e:
+                    import pdb; pdb.set_trace()
+            data = sample
+            if (sample_start_idx > 0) or (sample_end_idx < self.sequence_length):
+                data = np.zeros(
+                    shape=(self.sequence_length,) + input_arr.shape[1:],
+                    dtype=input_arr.dtype)
+                if sample_start_idx > 0:
+                    data[:sample_start_idx] = sample[0]
+                if sample_end_idx < self.sequence_length:
+                    data[sample_end_idx:] = sample[-1]
+                data[sample_start_idx:sample_end_idx] = sample
+            result[key] = data
+        return result

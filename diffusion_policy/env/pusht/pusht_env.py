@@ -158,6 +158,14 @@ class PushTEnv(gym.Env):
             + (self.block.angle % (2 * np.pi),))
         return obs
 
+    # def set_obs_action(self, sample_image, sample_agent_pos):
+    #     self.observation_space = spaces.Dict({
+    #         'image': spaces.Box(sample_image),
+    #         'agent_pos': spaces.Box(
+    #             sample_agent_pos
+    #         )
+    #     })
+
     def _get_goal_pose_body(self, pose):
         mass = 1
         inertia = pymunk.moment_for_box(mass, (50, 100))

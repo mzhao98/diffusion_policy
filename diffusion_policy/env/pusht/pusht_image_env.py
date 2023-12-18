@@ -33,7 +33,15 @@ class PushTImageEnv(PushTEnv):
             )
         })
         self.render_cache = None
-    
+
+
+    def set_to_state(self, state):
+        super()._set_state(state)
+
+
+
+
+
     def _get_obs(self):
         img = super()._render_frame(mode='rgb_array')
 

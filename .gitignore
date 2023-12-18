@@ -1,3 +1,15 @@
+
+
+# add some more gitignores
+data/*
+pusht_cchi_v7_replay.zarr.zip
+pusht_state_100ep.ckpt
+vis_traj_each_demo.zip
+overlay/*
+vis_traj_each_demo/*
+
+
+
 bin
 logs
 wandb
