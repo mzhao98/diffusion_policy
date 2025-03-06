@@ -9,7 +9,7 @@ from diffusion_policy.common.sampler import (
 from diffusion_policy.model.common.normalizer import LinearNormalizer
 from diffusion_policy.dataset.base_dataset import BaseImageDataset
 from diffusion_policy.common.normalize_util import get_image_range_normalizer
-
+import pdb
 class PushTImageDataset(BaseImageDataset):
     def __init__(self,
             zarr_path, 
@@ -20,10 +20,10 @@ class PushTImageDataset(BaseImageDataset):
             val_ratio=0.0,
             max_train_episodes=None
             ):
-        
+        # pdb.set_trace()
         super().__init__()
-        self.replay_buffer = ReplayBuffer.copy_from_path(
-            zarr_path, keys=['img', 'state', 'action'])
+        self.replay_buffer = ReplayBuffer.copy_from_path(zarr_path, keys=['img', 'state', 'action'])
+        # pdb.set_trace()
         val_mask = get_val_mask(
             n_episodes=self.replay_buffer.n_episodes, 
             val_ratio=val_ratio,
@@ -58,9 +58,11 @@ class PushTImageDataset(BaseImageDataset):
         return val_set
 
     def get_normalizer(self, mode='limits', **kwargs):
+        # pdb.set_trace()
         data = {
             'action': self.replay_buffer['action'],
             'agent_pos': self.replay_buffer['state'][...,:2]
+            # 'traj_idx': self.replay_buffer['traj_idx']
         }
         normalizer = LinearNormalizer()
         normalizer.fit(data=data, last_n_dims=1, mode=mode, **kwargs)

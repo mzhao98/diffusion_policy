@@ -4,7 +4,7 @@ from copy import deepcopy
 from gym import logger
 from gym.vector.vector_env import VectorEnv
 from gym.vector.utils import concatenate, create_empty_array
-
+import pdb
 __all__ = ["SyncVectorEnv"]
 
 
@@ -49,6 +49,7 @@ class SyncVectorEnv(VectorEnv):
         # self._rewards = [0] * self.num_envs
         # self._dones = [False] * self.num_envs
         self._actions = None
+        self._list_of_sampled_actions = None
 
     def seed(self, seeds=None):
         if seeds is None:
@@ -72,6 +73,18 @@ class SyncVectorEnv(VectorEnv):
 
         return deepcopy(self.observations) if self.copy else self.observations
 
+    def step(self, actions):
+        """Take an action for each parallel environment.
+
+        Args:
+            actions: element of :attr:`action_space` Batch of actions.
+
+        Returns:
+            Batch of (observations, rewards, terminated, truncated, infos) or (observations, rewards, dones, infos)
+        """
+        self.step_async(actions)
+        return self.step_wait()
+
     def step_async(self, actions):
         self._actions = actions
 
@@ -79,6 +92,42 @@ class SyncVectorEnv(VectorEnv):
         observations, infos = [], []
         for i, (env, action) in enumerate(zip(self.envs, self._actions)):
             observation, self._rewards[i], self._dones[i], info = env.step(action)
+            # if self._dones[i]:
+            #     observation = env.reset()
+            observations.append(observation)
+            infos.append(info)
+        self.observations = concatenate(
+            observations, self.observations, self.single_observation_space
+        )
+
+        return (
+            deepcopy(self.observations) if self.copy else self.observations,
+            np.copy(self._rewards),
+            np.copy(self._dones),
+            infos,
+        )
+    
+    def step_with_samples(self, actions, list_of_sampled_actions):
+        """Take an action for each parallel environment.
+
+        Args:
+            actions: element of :attr:`action_space` Batch of actions.
+
+        Returns:
+            Batch of (observations, rewards, terminated, truncated, infos) or (observations, rewards, dones, infos)
+        """
+        self.step_with_samples_async(actions, list_of_sampled_actions)
+        return self.step_with_samples_wait()
+    
+    def step_with_samples_async(self, actions, list_of_sampled_actions):
+        self._actions = actions
+        self._list_of_sampled_actions = list_of_sampled_actions
+
+    def step_with_samples_wait(self):
+        observations, infos = [], []
+        for i, (env, action) in enumerate(zip(self.envs, self._actions)):
+            # pdb.set_trace()
+            observation, self._rewards[i], self._dones[i], info = env.step_with_samples(action, self._list_of_sampled_actions)
             # if self._dones[i]:
             #     observation = env.reset()
             observations.append(observation)

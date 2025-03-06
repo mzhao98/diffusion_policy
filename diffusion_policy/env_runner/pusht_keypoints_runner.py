@@ -8,6 +8,7 @@ import dill
 import math
 import wandb.sdk.data_types.video as wv
 from diffusion_policy.env.pusht.pusht_keypoints_env import PushTKeypointsEnv
+# from diffusion_policy.env.push2d.push2d_keypoints_env import Push2dKeypointsEnv as PushTKeypointsEnv
 from diffusion_policy.gym_util.async_vector_env import AsyncVectorEnv
 # from diffusion_policy.gym_util.sync_vector_env import SyncVectorEnv
 from diffusion_policy.gym_util.multistep_wrapper import MultiStepWrapper

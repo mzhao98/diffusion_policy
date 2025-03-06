@@ -40,5 +40,17 @@ class VideoWrapper(gym.Wrapper):
             self.frames.append(frame)
         return result
     
+    def step_with_samples(self, action, list_of_samples):
+        # print("video wrapper super", super())
+        # print("sampling with video wrapper")
+        result = super().step_with_samples(action, list_of_samples)
+        self.step_count += 1
+        if self.enabled and ((self.step_count % self.steps_per_render) == 0):
+            frame = self.env.render(
+                mode=self.mode, **self.render_kwargs)
+            assert frame.dtype == np.uint8
+            self.frames.append(frame)
+        return result
+    
     def render(self, mode='rgb_array', **kwargs):
         return self.frames

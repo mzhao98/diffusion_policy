@@ -15,6 +15,7 @@ import hydra
 import torch
 import dill
 import wandb
+import pdb
 import json
 from diffusion_policy.workspace.base_workspace import BaseWorkspace
 
@@ -43,12 +44,18 @@ def main(checkpoint, output_dir, device):
     device = torch.device(device)
     policy.to(device)
     policy.eval()
+    # pdb.set_trace()
+    cfg.task.env_runner.n_train = 0
+    cfg.task.env_runner.n_test = 5
+    cfg.task.env_runner.n_test_vis = 5
     
     # run eval
     env_runner = hydra.utils.instantiate(
         cfg.task.env_runner,
         output_dir=output_dir)
+    env_runner.set_mode(0)
     runner_log = env_runner.run(policy)
+    
     
     # dump log to json
     json_log = dict()

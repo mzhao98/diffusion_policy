@@ -7,6 +7,8 @@ import numcodecs
 import numpy as np
 from functools import cached_property
 
+import pdb
+
 def check_chunks_compatible(chunks: tuple, shape: tuple):
     assert len(shape) == len(chunks)
     for c in chunks:
@@ -220,6 +222,7 @@ class ReplayBuffer:
         if backend == 'numpy':
             print('backend argument is deprecated!')
             store = None
+        # pdb.set_trace()
         group = zarr.open(os.path.expanduser(zarr_path), 'r')
         return cls.copy_from_store(src_store=group.store, store=store, 
             keys=keys, chunks=chunks, compressors=compressors, 

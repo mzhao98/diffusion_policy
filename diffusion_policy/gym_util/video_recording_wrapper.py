@@ -2,7 +2,24 @@ import gym
 import numpy as np
 from diffusion_policy.real_world.video_recorder import VideoRecorder
 
-class VideoRecordingWrapper(gym.Wrapper):
+
+class GymWrapperWithSamples(gym.Wrapper):
+    def __init__(self, 
+            env, 
+        ):
+        # print("env", env)
+        super().__init__(env)
+    
+    def step_with_samples(self, action, list_of_samples):
+        """Steps through the environment with action."""
+        # print("running step with samples in wrapper")
+        # print("self.env.", self.env)
+        return self.env.step_with_samples(action, list_of_samples)
+
+    
+
+
+class VideoRecordingWrapper(GymWrapperWithSamples):
     def __init__(self, 
             env, 
             video_recoder: VideoRecorder,
@@ -33,6 +50,21 @@ class VideoRecordingWrapper(gym.Wrapper):
     
     def step(self, action):
         result = super().step(action)
+        self.step_count += 1
+        if self.file_path is not None \
+            and ((self.step_count % self.steps_per_render) == 0):
+            if not self.video_recoder.is_ready():
+                self.video_recoder.start(self.file_path)
+
+            frame = self.env.render(
+                mode=self.mode, **self.render_kwargs)
+            assert frame.dtype == np.uint8
+            self.video_recoder.write_frame(frame)
+        return result
+    
+    def step_with_samples(self, action, list_of_samples):
+        # print("video recording wrapper super", super())
+        result = super().step_with_samples(action, list_of_samples)
         self.step_count += 1
         if self.file_path is not None \
             and ((self.step_count % self.steps_per_render) == 0):

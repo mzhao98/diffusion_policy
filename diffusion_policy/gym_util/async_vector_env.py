@@ -37,6 +37,7 @@ class AsyncState(Enum):
     DEFAULT = "default"
     WAITING_RESET = "reset"
     WAITING_STEP = "step"
+    WAITING_STEP_WITH_SAMPLES = "step_with_samples"
     WAITING_CALL = "call"
 
 
@@ -166,6 +167,18 @@ class AsyncVectorEnv(VectorEnv):
         self._state = AsyncState.DEFAULT
         self._check_observation_spaces()
 
+    def step_with_samples(self, actions, list_of_sampled_actions):
+        """Take an action for each parallel environment.
+
+        Args:
+            actions: element of :attr:`action_space` Batch of actions.
+
+        Returns:
+            Batch of (observations, rewards, terminated, truncated, infos) or (observations, rewards, dones, infos)
+        """
+        self.step_with_samples_async(actions, list_of_sampled_actions)
+        return self.step_with_samples_wait()
+
     def seed(self, seeds=None):
         self._assert_is_running()
         if seeds is None:
@@ -235,6 +248,105 @@ class AsyncVectorEnv(VectorEnv):
             )
 
         return deepcopy(self.observations) if self.copy else self.observations
+
+    def step_with_samples_async(self, actions, list_of_sampled_actions):
+        """
+        Parameters
+        ----------
+        actions : iterable of samples from `action_space`
+            List of actions.
+        """
+        self._assert_is_running()
+        if self._state != AsyncState.DEFAULT:
+            raise AlreadyPendingCallError(
+                "Calling `step_async` while waiting "
+                "for a pending call to `{0}` to complete.".format(self._state.value),
+                self._state.value,
+            )
+
+        for pipe, action in zip(self.parent_pipes, actions):
+            # print("action A", action)
+            # pipe.send(("step", action))
+            pipe.send(("step_with_samples", (action, list_of_sampled_actions)))
+            # print("action B", action)
+            # print("list_of_sampled_actions", list_of_sampled_actions)
+        self._state = AsyncState.WAITING_STEP
+
+    def step_with_samples_wait(self, timeout=None):
+        """
+        Parameters
+        ----------
+        timeout : int or float, optional
+            Number of seconds before the call to `step_wait` times out. If
+            `None`, the call to `step_wait` never times out.
+        Returns
+        -------
+        observations : sample from `observation_space`
+            A batch of observations from the vectorized environment.
+        rewards : `np.ndarray` instance (dtype `np.float_`)
+            A vector of rewards from the vectorized environment.
+        dones : `np.ndarray` instance (dtype `np.bool_`)
+            A vector whose entries indicate whether the episode has ended.
+        infos : list of dict
+            A list of auxiliary diagnostic information.
+        """
+        self._assert_is_running()
+        if self._state != AsyncState.WAITING_STEP:
+            raise NoAsyncCallError(
+                "Calling `step_wait` without any prior call " "to `step_async`.",
+                AsyncState.WAITING_STEP.value,
+            )
+
+        if not self._poll(timeout):
+            self._state = AsyncState.DEFAULT
+            raise mp.TimeoutError(
+                "The call to `step_wait` has timed out after "
+                "{0} second{1}.".format(timeout, "s" if timeout > 1 else "")
+            )
+
+        results, successes = zip(*[pipe.recv() for pipe in self.parent_pipes])
+        self._raise_if_errors(successes)
+        self._state = AsyncState.DEFAULT
+        observations_list, rewards, dones, infos = zip(*results)
+
+        if not self.shared_memory:
+            self.observations = concatenate(
+                observations_list, self.observations, self.single_observation_space
+            )
+
+        return (
+            deepcopy(self.observations) if self.copy else self.observations,
+            np.array(rewards),
+            np.array(dones, dtype=np.bool_),
+            infos,
+        )
+
+
+    def step_with_samples(self, actions, list_of_sampled_actions):
+        """Take an action for each parallel environment.
+
+        Args:
+            actions: element of :attr:`action_space` Batch of actions.
+
+        Returns:
+            Batch of (observations, rewards, terminated, truncated, infos) or (observations, rewards, dones, infos)
+        """
+        # print("step with samples being called")
+        self.step_with_samples_async(actions, list_of_sampled_actions)
+        return self.step_with_samples_wait()
+
+    def step(self, actions):
+        """Take an action for each parallel environment.
+
+        Args:
+            actions: element of :attr:`action_space` Batch of actions.
+
+        Returns:
+            Batch of (observations, rewards, terminated, truncated, infos) or (observations, rewards, dones, infos)
+        """
+        # print("step being called")
+        self.step_async(actions)
+        return self.step_wait()
 
     def step_async(self, actions):
         """
@@ -563,6 +675,7 @@ def _worker(index, env_fn, pipe, parent_pipe, shared_memory, error_queue):
     assert shared_memory is None
     env = env_fn()
     parent_pipe.close()
+    import pdb
     try:
         while True:
             command, data = pipe.recv()
@@ -570,7 +683,18 @@ def _worker(index, env_fn, pipe, parent_pipe, shared_memory, error_queue):
                 observation = env.reset()
                 pipe.send((observation, True))
             elif command == "step":
-                observation, reward, done, info = env.step(data)
+                # pdb.set_trace()
+                observation, reward, done, info = env.step_with_samples(data)
+                # observation, reward, done, info = env.step(data)
+                # if done:
+                #     observation = env.reset()
+                pipe.send(((observation, reward, done, info), True))
+            elif command == "step_with_samples":
+                # pdb.set_trace()
+                # print("data", data)
+                # print("data", data)
+                # print("command", command)
+                observation, reward, done, info = env.step_with_samples(data[0], data[1])
                 # if done:
                 #     observation = env.reset()
                 pipe.send(((observation, reward, done, info), True))
@@ -582,7 +706,7 @@ def _worker(index, env_fn, pipe, parent_pipe, shared_memory, error_queue):
                 break
             elif command == "_call":
                 name, args, kwargs = data
-                if name in ["reset", "step", "seed", "close"]:
+                if name in ["reset", "step", "seed", "close", 'step_with_samples']:
                     raise ValueError(
                         f"Trying to call function `{name}` with "
                         f"`_call`. Use `{name}` directly instead."
@@ -617,6 +741,7 @@ def _worker_shared_memory(index, env_fn, pipe, parent_pipe, shared_memory, error
     env = env_fn()
     observation_space = env.observation_space
     parent_pipe.close()
+    import pdb
     try:
         while True:
             command, data = pipe.recv()
@@ -627,12 +752,40 @@ def _worker_shared_memory(index, env_fn, pipe, parent_pipe, shared_memory, error
                 )
                 pipe.send((None, True))
             elif command == "step":
+                # pdb.set_trace()
+                # print("data 1", data)
+                # observation, reward, done, info = env.step_with_samples(data)
+                # print("env", env)
                 observation, reward, done, info = env.step(data)
+                # print("shape", observation.shape)
+                # print("shared memory", shared_memory)
+                # print("observation space", observation_space)
                 # if done:
                 #     observation = env.reset()
                 write_to_shared_memory(
                     index, observation, shared_memory, observation_space
                 )
+                pipe.send(((None, reward, done, info), True))
+            elif command == "step_with_samples":
+                # pdb.set_trace()
+                # print("data 2", data)
+                # print("data", data)
+                # print("command 2", command)
+                observation, reward, done, info = env.step_with_samples(data[0], data[1])
+                # print("shape", observation.shape)
+                # print("shared memory", shared_memory)
+                # print("observation space", observation_space)
+
+                write_to_shared_memory(
+                    index, observation, shared_memory, observation_space
+                )
+                
+
+                # print("made it here 4")
+                # print("observation", observation)
+                # print("reward", reward)
+                # print("done", done)
+
                 pipe.send(((None, reward, done, info), True))
             elif command == "seed":
                 env.seed(data)

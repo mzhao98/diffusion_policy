@@ -122,11 +122,13 @@ class SequenceSampler:
         buffer_start_idx, buffer_end_idx, sample_start_idx, sample_end_idx \
             = self.indices[idx]
         result = dict()
+        trajectory_idx = self.replay_buffer.get_episode_idxs()
         for key in self.keys:
             input_arr = self.replay_buffer[key]
             # performance optimization, avoid small allocation if possible
             if key not in self.key_first_k:
                 sample = input_arr[buffer_start_idx:buffer_end_idx]
+                traj_indices = trajectory_idx[buffer_start_idx:buffer_end_idx]
             else:
                 # performance optimization, only load used obs steps
                 n_data = buffer_end_idx - buffer_start_idx
@@ -135,19 +137,39 @@ class SequenceSampler:
                 # the non-loaded region should never be used
                 sample = np.full((n_data,) + input_arr.shape[1:], 
                     fill_value=np.nan, dtype=input_arr.dtype)
+                # do the same with traj_indices
+                traj_indices = np.full(n_data, fill_value=-1, dtype=trajectory_idx.dtype)
                 try:
                     sample[:k_data] = input_arr[buffer_start_idx:buffer_start_idx+k_data]
+                    traj_indices[:k_data] = trajectory_idx[buffer_start_idx:buffer_start_idx+k_data]
                 except Exception as e:
                     import pdb; pdb.set_trace()
             data = sample
+            traj_indices_data = traj_indices
             if (sample_start_idx > 0) or (sample_end_idx < self.sequence_length):
                 data = np.zeros(
                     shape=(self.sequence_length,) + input_arr.shape[1:],
                     dtype=input_arr.dtype)
+                traj_indices_data = np.zeros(
+                    shape=(self.sequence_length,),
+                    dtype=input_arr.dtype)
+                
                 if sample_start_idx > 0:
                     data[:sample_start_idx] = sample[0]
+                    traj_indices_data[:sample_start_idx] = traj_indices[0]
+
                 if sample_end_idx < self.sequence_length:
                     data[sample_end_idx:] = sample[-1]
+                    traj_indices_data[sample_end_idx:] = traj_indices[-1]
+
                 data[sample_start_idx:sample_end_idx] = sample
+                traj_indices_data[sample_start_idx:sample_end_idx] = traj_indices
             result[key] = data
+            result['idx'] = traj_indices_data
+
+        # get trajectory indices for each index
+        
+        
+
+
         return result

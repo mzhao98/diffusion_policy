@@ -3,6 +3,25 @@ from gym import spaces
 import numpy as np
 from collections import defaultdict, deque
 import dill
+# from diffusion_policy.gym_util.gym_wrapper_copy import Wrapper
+import pdb
+
+class GymWrapperWithSamples(gym.Wrapper):
+    def __init__(self, 
+            env, 
+        ):
+        # print("env", env)
+        super().__init__(env)
+    
+    def step_with_samples(self, action, list_of_samples):
+        """Steps through the environment with action."""
+        # print("running step with samples in wrapper")
+        # print("self.env.", self.env)
+        return self.env.step_with_samples(action, list_of_samples)
+
+    
+
+
 
 def stack_repeated(x, n):
     return np.repeat(np.expand_dims(x,axis=0),n,axis=0)
@@ -64,7 +83,7 @@ def stack_last_n_obs(all_obs, n_steps):
     return result
 
 
-class MultiStepWrapper(gym.Wrapper):
+class MultiStepWrapper(GymWrapperWithSamples):
     def __init__(self, 
             env, 
             n_obs_steps, 
@@ -72,6 +91,7 @@ class MultiStepWrapper(gym.Wrapper):
             max_episode_steps=None,
             reward_agg_method='max'
         ):
+        # print("env", env)
         super().__init__(env)
         self._action_space = repeated_space(env.action_space, n_action_steps)
         self._observation_space = repeated_space(env.observation_space, n_obs_steps)
@@ -107,6 +127,41 @@ class MultiStepWrapper(gym.Wrapper):
                 # termination
                 break
             observation, reward, done, info = super().step(act)
+
+            self.obs.append(observation)
+            self.reward.append(reward)
+            if (self.max_episode_steps is not None) \
+                and (len(self.reward) >= self.max_episode_steps):
+                # truncation
+                done = True
+            self.done.append(done)
+            self._add_info(info)
+
+        observation = self._get_obs(self.n_obs_steps)
+        reward = aggregate(self.reward, self.reward_agg_method)
+        done = aggregate(self.done, 'max')
+        info = dict_take_last_n(self.info, self.n_obs_steps)
+        return observation, reward, done, info
+    
+    def step_with_samples(self, action, list_of_samples):
+        """
+        actions: (n_action_steps,) + action_shape
+        """
+        # print("running step with samples in multistep wrapper")
+        # print("super", super())
+        # print("action", action)
+        # print("list_of_samples", list_of_samples)
+        # for t in range(len(action)):
+        for t in range(0,len(action)):
+            act = action[t]
+            if len(self.done) > 0 and self.done[-1]:
+                # termination
+                break
+            # pdb.set_trace()
+            if t == 0:
+                observation, reward, done, info = super().step_with_samples(act, list_of_samples)
+            else:
+                observation, reward, done, info = super().step(act)
 
             self.obs.append(observation)
             self.reward.append(reward)
