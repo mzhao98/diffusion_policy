@@ -143,6 +143,28 @@ class MultiStepWrapper(GymWrapperWithSamples):
         info = dict_take_last_n(self.info, self.n_obs_steps)
         return observation, reward, done, info
     
+    def step_with_one_action(self, action):
+        """
+        actions: (n_action_steps,) + action_shape
+        """
+
+        observation, reward, done, info = super().step(action)
+
+        self.obs.append(observation)
+        self.reward.append(reward)
+        if (self.max_episode_steps is not None) \
+            and (len(self.reward) >= self.max_episode_steps):
+            # truncation
+            done = True
+        self.done.append(done)
+        self._add_info(info)
+
+        observation = self._get_obs(self.n_obs_steps)
+        reward = aggregate(self.reward, self.reward_agg_method)
+        done = aggregate(self.done, 'max')
+        info = dict_take_last_n(self.info, self.n_obs_steps)
+        return observation, reward, done, info
+    
     def step_with_samples(self, action, list_of_samples):
         """
         actions: (n_action_steps,) + action_shape

@@ -12,6 +12,8 @@ from diffusion_policy.model.diffusion.mask_generator import LowdimMaskGenerator
 from typing import Union, Tuple
 import pdb
 from scipy.integrate import quad
+import copy
+from transformers import BertTokenizer, BertModel
 # from diffusers.schedulers.scheduling_ddpm.DDPMScheduler import DDPMScheduler
 
 class AccessDDPMScheduler(DDPMScheduler):
@@ -139,6 +141,18 @@ class DiffusionUnetLowdimPolicy(BaseLowdimPolicy):
         if num_inference_steps is None:
             num_inference_steps = noise_scheduler.config.num_train_timesteps
         self.num_inference_steps = num_inference_steps
+
+        
+        self.cluster_centers = [98,63]
+        self.n_clusters = 2
+        self.cluster_centers = ['right', 'left']
+        # self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+        # self.bert_context_encoder = BertModel.from_pretrained("bert-base-uncased",output_hidden_states = True)
+        # self.n_clusters = 5
+        # self.cluster_centers = [34, 11, 68, 25, 93]
+        # self.n_clusters = 100
+        # self.cluster_centers = [54, 63, 38, 6, 75, 93, 57, 68, 65, 33, 21, 16, 96, 1, 4, 24, 14, 2, 94, 71, 42, 45, 17, 60, 80, 19, 22, 50, 40, 27, 74, 66, 35, 53, 5, 76, 81, 64, 18, 55, 62, 10, 15, 90, 72, 8, 31, 84, 43, 85, 11, 9, 79, 73, 82, 28, 83, 56, 49, 98, 26, 46, 91, 78, 52, 37, 88, 36, 41, 0, 13, 44, 29, 32, 92, 97, 25, 3, 51, 58, 12, 20, 67, 47, 86, 95, 61, 70, 48, 34, 77, 59, 30, 23, 7, 99, 39, 89, 87, 69]
+
     
     # ========= inference  ============
     def conditional_sample(self, 
@@ -146,6 +160,7 @@ class DiffusionUnetLowdimPolicy(BaseLowdimPolicy):
             local_cond=None, global_cond=None, 
             lang_context_cond=None, 
             traj_context_cond=None,
+            use_weight_transform=False,
             generator=None,
             # keyword arguments to scheduler.step
             **kwargs
@@ -162,6 +177,30 @@ class DiffusionUnetLowdimPolicy(BaseLowdimPolicy):
     
         # set step values
         scheduler.set_timesteps(self.num_inference_steps)
+
+        if use_weight_transform:
+            weights_over_ntrain = self.model.weight_transformer(global_cond)
+            lang_context_cond = torch.argmax(weights_over_ntrain, dim=1)
+            print("probs", torch.max(weights_over_ntrain, dim=1))
+            new_lang_context_cond = []
+            # convert to cluster centers
+            for c in range(lang_context_cond.shape[0]):
+                # pdb.set_trace()
+                # traj_context_cond[c] = self.cluster_centers[traj_context_cond[c].item()]
+                lang_command = self.cluster_centers[lang_context_cond[c].item()]
+                print("lang_command", lang_command)
+                new_lang_context_cond.append(self.get_lang_embedding(lang_command))
+
+            lang_context_cond = torch.stack(new_lang_context_cond)
+
+            # traj_context_cond = traj_context_cond.unsqueeze(0)
+            # traj_context_cond = traj_context_cond.unsqueeze(0)
+            # print("prob", torch.max(weights_over_ntrain, dim=1))
+            # print("traj_context_cond", traj_context_cond)
+            # print("lang_context_cond", lang_context_cond.shape)
+            # move to device
+            lang_context_cond = lang_context_cond.to(condition_data.device)
+
 
         for t in scheduler.timesteps:
             # 1. apply conditioning
@@ -185,12 +224,12 @@ class DiffusionUnetLowdimPolicy(BaseLowdimPolicy):
         return trajectory
 
 
-    def predict_action(self, obs_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    def predict_action(self, obs_dict: Dict[str, torch.Tensor], use_weight_transform=False) -> Dict[str, torch.Tensor]:
         """
         obs_dict: must include "obs" key
         result: must include "action" key
         """
-
+        # self.n_action_steps = 1
         assert 'obs' in obs_dict
         assert 'past_action' not in obs_dict # not implemented yet
         # pdb.set_trace()
@@ -248,6 +287,10 @@ class DiffusionUnetLowdimPolicy(BaseLowdimPolicy):
             cond_mask[:,:To,Da:] = True
 
         # pdb.set_trace()
+        # weights_over_ntrain = self.model.weight_transformer(global_cond)
+        # traj_context_cond = torch.argmax(weights_over_ntrain, dim=1)
+        # unsqueeze 0
+        
 
         # run sampling
         nsample = self.conditional_sample(
@@ -257,6 +300,7 @@ class DiffusionUnetLowdimPolicy(BaseLowdimPolicy):
             global_cond=global_cond,
             lang_context_cond=lang_ncond,
             traj_context_cond=traj_ncond,
+            use_weight_transform=use_weight_transform, 
             **self.kwargs)
         
         # unnormalize prediction
@@ -287,10 +331,26 @@ class DiffusionUnetLowdimPolicy(BaseLowdimPolicy):
     
 
 
-
     # ========= training  ============
     def set_normalizer(self, normalizer: LinearNormalizer):
         self.normalizer.load_state_dict(normalizer.state_dict())
+
+    def create_obs_transformer(self):
+        self.model.create_obs_transformer()
+
+    def create_weight_transformer(self, n_clusters, cluster_centers):
+        self.n_clusters = n_clusters
+        self.cluster_centers = cluster_centers
+        self.model.create_weight_transformer(n_clusters, cluster_centers)
+
+    def get_lang_embedding(self, text_label):
+        self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+        self.bert_context_encoder = BertModel.from_pretrained("bert-base-uncased",output_hidden_states = True)
+        tokenized_inputs = self.tokenizer(text_label, padding=True, truncation=True, return_tensors="pt")
+        with torch.no_grad(): 
+            outputs = self.bert_context_encoder(**tokenized_inputs)
+        embeddings = outputs.last_hidden_state[:, 0, :]
+        return embeddings
 
     def compute_loss(self, batch):
 
@@ -350,7 +410,7 @@ class DiffusionUnetLowdimPolicy(BaseLowdimPolicy):
         w = 0.5
         loss_scalar = 0.01
         return w * (loss * loss_scalar) + (1 - w) * original_loss
-        # return loss
+        # return original_loss
 
     def compute_loss_with_cfg(self, batch):
         # normalize input
@@ -366,6 +426,12 @@ class DiffusionUnetLowdimPolicy(BaseLowdimPolicy):
         nbatch = self.normalizer.normalize(batch)
         obs = nbatch['obs']
         action = nbatch['action']
+
+        # obs requires grad
+        obs.requires_grad_(True)
+
+        # # action requires grad
+        action.requires_grad_(True)
 
 
         # compute score with classifier
@@ -443,7 +509,7 @@ class DiffusionUnetLowdimPolicy(BaseLowdimPolicy):
         # pred =  (1 + w) * (pred_with_class) - (w) * (pred_without_class)
         rand_p = torch.rand(1).item()
         rand_q = torch.rand(1).item()
-
+        traj_context_cond = None
         if rand_p < 0.2:
             if rand_q < 0.5:
                 pred = self.model(noisy_trajectory, timesteps,local_cond=local_cond, global_cond=global_cond, 
@@ -454,6 +520,306 @@ class DiffusionUnetLowdimPolicy(BaseLowdimPolicy):
         else:
             pred = self.model(noisy_trajectory, timesteps,local_cond=local_cond, global_cond=global_cond, 
                                      lang_context_cond=lang_context_cond, traj_context_cond=traj_context_cond)
+
+
+        pred_type = self.noise_scheduler.config.prediction_type 
+        if pred_type == 'epsilon':
+            target = noise
+        elif pred_type == 'sample':
+            target = trajectory
+        else:
+            raise ValueError(f"Unsupported prediction type {pred_type}")
+
+        loss = F.mse_loss(pred, target, reduction='none')
+        loss = loss * loss_mask.type(loss.dtype)
+        loss = reduce(loss, 'b ... -> b (...)', 'mean')
+        loss = loss.mean()
+        return loss
+    
+    def compute_loss_with_weight_cfg(self, batch):
+        # normalize input
+        assert 'valid_mask' not in batch
+        # if 'idx' not in batch:
+        #     traj_context_cond = None
+        # else:
+        #     traj_context_cond = batch['idx']
+
+        # lang_context_cond = batch['utterance']
+        # drop 'idx' from batch
+        batch = {k: v for k, v in batch.items() if k not in ['idx', 'utterance']}
+        nbatch = self.normalizer.normalize(batch)
+        obs = nbatch['obs']
+        action = nbatch['action']
+
+        # obs requires grad
+        obs.requires_grad_(True)
+
+        # # action requires grad
+        action.requires_grad_(True)
+
+
+        # compute score with classifier
+        ##############################################
+
+        # handle different ways of passing observation
+        local_cond = None
+        global_cond = None
+        # context_cond = None
+        trajectory = action
+        if self.obs_as_local_cond:
+            # zero out observations after n_obs_steps
+            local_cond = obs
+            local_cond[:,self.n_obs_steps:,:] = 0
+        elif self.obs_as_global_cond:
+            global_cond = obs[:,:self.n_obs_steps,:].reshape(
+                obs.shape[0], -1)
+            # context_cond = batch_traj_indices[:,:self.n_obs_steps,:].reshape(
+            #     batch_traj_indices.shape[0], -1)
+            if self.pred_action_steps_only:
+                To = self.n_obs_steps
+                start = To
+                if self.oa_step_convention:
+                    start = To - 1
+                end = start + self.n_action_steps
+                trajectory = action[:,start:end]
+        else:
+            trajectory = torch.cat([action, obs], dim=-1)
+
+        # generate impainting mask
+        if self.pred_action_steps_only:
+            condition_mask = torch.zeros_like(trajectory, dtype=torch.bool)
+        else:
+            condition_mask = self.mask_generator(trajectory.shape)
+
+        # Sample noise that we'll add to the images
+        noise = torch.randn(trajectory.shape, device=trajectory.device)
+        bsz = trajectory.shape[0]
+        # Sample a random timestep for each image
+        timesteps = torch.randint(
+            0, self.noise_scheduler.config.num_train_timesteps, 
+            (bsz,), device=trajectory.device
+        ).long()
+        # Add noise to the clean images according to the noise magnitude at each timestep
+        # (this is the forward diffusion process)
+        noisy_trajectory = self.noise_scheduler.add_noise(
+            trajectory, noise, timesteps)
+        
+        # compute loss mask
+        loss_mask = ~condition_mask
+
+        # apply conditioning
+        noisy_trajectory[condition_mask] = trajectory[condition_mask]
+        
+        # Predict the noise residual
+        n_train = self.n_clusters
+        # uniform_over_ntrain = torch.ones(n_train, device=trajectory.device) / n_train
+        weights_over_ntrain = self.model.weight_transformer(global_cond)
+        # weights_over_ntrain = weights_over_ntrain.unsqueeze(1).expand(-1, trajectory.shape[1], -1)
+        # normalize weights
+        # pdb.set_trace()
+        pred = self.model(noisy_trajectory, timesteps, local_cond=local_cond, global_cond=global_cond, 
+                                     lang_context_cond=None, traj_context_cond=None)
+        
+        to_add = []
+        for cand_traj_idx in range(n_train):
+            # cluster_traj_idx = self.cluster_centers[cand_traj_idx]
+            cluster_traj_idx = self.get_lang_embedding(self.cluster_centers[cand_traj_idx])
+            # expand dim 0 to match batch size
+            # pdb.set_trace()
+            cluster_traj_idx = cluster_traj_idx.expand(trajectory.shape[0], -1)
+            # move to device
+            cluster_traj_idx = cluster_traj_idx.to(trajectory.device)
+            pred_cand = self.model(noisy_trajectory, timesteps,local_cond=local_cond, global_cond=global_cond,
+                                lang_context_cond=cluster_traj_idx, traj_context_cond=None) # (B, T, D)
+            om = weights_over_ntrain[:, cand_traj_idx] # (B)
+            # pdb.set_trace()
+            # print("om", om)
+            # duplicate w to match pred_cand
+            om = om.unsqueeze(1).expand(-1, pred_cand.shape[1])
+            om = om.unsqueeze(-1).expand(-1, -1, pred_cand.shape[-1])
+            # elementwise multiply
+            # om = torch.broadcast_to(om, (pred_cand.shape[0], pred_cand.shape[1]))
+            composite = pred_cand * om
+            # composite = pred_cand
+            # for batch_idx in range(om.shape[0]):
+            #     composite[batch_idx] = pred_cand[batch_idx] * om[batch_idx] - pred[batch_idx] * om[batch_idx]
+
+            to_add.append(composite)
+        pred =  torch.stack(to_add, dim=0).sum(dim=0)
+
+            
+        
+        ##############################################
+
+        pred_type = self.noise_scheduler.config.prediction_type 
+        if pred_type == 'epsilon':
+            target = noise
+        elif pred_type == 'sample':
+            target = trajectory
+        else:
+            raise ValueError(f"Unsupported prediction type {pred_type}")
+
+        loss = F.mse_loss(pred, target, reduction='none')
+        loss = loss * loss_mask.type(loss.dtype)
+        loss = reduce(loss, 'b ... -> b (...)', 'mean')
+        loss = loss.mean()
+        return loss
+    
+    def compute_loss_with_weight_lang_cfg(self, batch):
+        # normalize input
+        assert 'valid_mask' not in batch
+        if 'idx' not in batch:
+            traj_context_cond = None
+        else:
+            traj_context_cond = batch['idx']
+
+        lang_context_cond = batch['utterance']
+        # drop 'idx' from batch
+        batch = {k: v for k, v in batch.items() if k not in ['idx', 'utterance']}
+        nbatch = self.normalizer.normalize(batch)
+        obs = nbatch['obs']
+        action = nbatch['action']
+
+        # obs requires grad
+        obs.requires_grad_(True)
+
+        # # action requires grad
+        action.requires_grad_(True)
+
+
+        # compute score with classifier
+        ##############################################
+
+        # handle different ways of passing observation
+        local_cond = None
+        global_cond = None
+        # context_cond = None
+        trajectory = action
+        if self.obs_as_local_cond:
+            # zero out observations after n_obs_steps
+            local_cond = obs
+            local_cond[:,self.n_obs_steps:,:] = 0
+        elif self.obs_as_global_cond:
+            global_cond = obs[:,:self.n_obs_steps,:].reshape(
+                obs.shape[0], -1)
+            # context_cond = batch_traj_indices[:,:self.n_obs_steps,:].reshape(
+            #     batch_traj_indices.shape[0], -1)
+            if self.pred_action_steps_only:
+                To = self.n_obs_steps
+                start = To
+                if self.oa_step_convention:
+                    start = To - 1
+                end = start + self.n_action_steps
+                trajectory = action[:,start:end]
+        else:
+            trajectory = torch.cat([action, obs], dim=-1)
+
+        # generate impainting mask
+        if self.pred_action_steps_only:
+            condition_mask = torch.zeros_like(trajectory, dtype=torch.bool)
+        else:
+            condition_mask = self.mask_generator(trajectory.shape)
+
+        # Sample noise that we'll add to the images
+        noise = torch.randn(trajectory.shape, device=trajectory.device)
+        bsz = trajectory.shape[0]
+        # Sample a random timestep for each image
+        timesteps = torch.randint(
+            0, self.noise_scheduler.config.num_train_timesteps, 
+            (bsz,), device=trajectory.device
+        ).long()
+        # Add noise to the clean images according to the noise magnitude at each timestep
+        # (this is the forward diffusion process)
+        noisy_trajectory = self.noise_scheduler.add_noise(
+            trajectory, noise, timesteps)
+        
+        # compute loss mask
+        loss_mask = ~condition_mask
+
+        # apply conditioning
+        noisy_trajectory[condition_mask] = trajectory[condition_mask]
+        
+        # Predict the noise residual
+        n_train = self.n_clusters
+        # uniform_over_ntrain = torch.ones(n_train, device=trajectory.device) / n_train
+        weights_over_ntrain = self.model.weight_transformer(global_cond)
+        # weights_over_ntrain = weights_over_ntrain.unsqueeze(1).expand(-1, trajectory.shape[1], -1)
+        # normalize weights
+        # pdb.set_trace()
+        pred = self.model(noisy_trajectory, timesteps, local_cond=local_cond, global_cond=global_cond, 
+                                     lang_context_cond=lang_context_cond, traj_context_cond=None)
+        
+        rand_p = torch.rand(1).item()
+        rand_q = torch.rand(1).item()
+
+        if rand_p < 0.8:
+            # if rand_q < 0.5:
+            #     pred = self.model(noisy_trajectory, timesteps,local_cond=local_cond, global_cond=global_cond, 
+            #                          lang_context_cond=lang_context_cond, traj_context_cond=None)
+            # else:
+            to_add = []
+            for cand_traj_idx in range(n_train):
+                # cluster_traj_idx = self.cluster_centers[cand_traj_idx]
+                # pred_cand = self.model(noisy_trajectory, timesteps,local_cond=local_cond, global_cond=global_cond,
+                #                     lang_context_cond=None, traj_context_cond=cluster_traj_idx) # (B, T, D)
+                cluster_traj_idx = self.get_lang_embedding(self.cluster_centers[cand_traj_idx])
+                # expand dim 0 to match batch size
+                cluster_traj_idx = cluster_traj_idx.expand(trajectory.shape[0], -1)
+                # move to device
+                cluster_traj_idx = cluster_traj_idx.to(trajectory.device)
+                pred_cand = self.model(noisy_trajectory, timesteps,local_cond=local_cond, global_cond=global_cond,
+                            lang_context_cond=cluster_traj_idx, traj_context_cond=None) 
+                om = weights_over_ntrain[:, cand_traj_idx] # (B)
+                # pdb.set_trace()
+                # print("om", om)
+                # duplicate w to match pred_cand
+                om = om.unsqueeze(1).expand(-1, pred_cand.shape[1])
+                om = om.unsqueeze(-1).expand(-1, -1, pred_cand.shape[-1])
+                # elementwise multiply
+                composite = pred_cand * om
+                to_add.append(composite)
+            pred = torch.stack(to_add, dim=0).sum(dim=0)
+        else:
+            pred = self.model(noisy_trajectory, timesteps, local_cond=local_cond, global_cond=global_cond, 
+                                     lang_context_cond=None, traj_context_cond=None)
+            # to_add = []
+            # for cand_traj_idx in range(n_train):
+            #     cluster_traj_idx = self.cluster_centers[cand_traj_idx]
+            #     pred_cand = self.model(noisy_trajectory, timesteps,local_cond=local_cond, global_cond=global_cond,
+            #                         lang_context_cond=None, traj_context_cond=None) # (B, T, D)
+            #     om = weights_over_ntrain[:, cand_traj_idx] # (B)
+            #     # pdb.set_trace()
+            #     # print("om", om)
+            #     # duplicate w to match pred_cand
+            #     om = om.unsqueeze(1).expand(-1, pred_cand.shape[1])
+            #     om = om.unsqueeze(-1).expand(-1, -1, pred_cand.shape[-1])
+            #     # elementwise multiply
+            #     composite = pred_cand * om
+            #     to_add.append(composite)
+            # pred = torch.stack(to_add, dim=0).sum(dim=0)
+
+        
+
+            
+        
+        ##############################################
+
+        # compute aggregate score
+        # w = 1.5
+        # pred =  (1 + w) * (pred_with_class) - (w) * (pred_without_class)
+        # rand_p = torch.rand(1).item()
+        # rand_q = torch.rand(1).item()
+
+        # if rand_p < 0.2:
+        #     if rand_q < 0.5:
+        #         pred = self.model(noisy_trajectory, timesteps,local_cond=local_cond, global_cond=global_cond, 
+        #                              lang_context_cond=lang_context_cond, traj_context_cond=None)
+        #     else:
+        #         pred = self.model(noisy_trajectory, timesteps,local_cond=local_cond, global_cond=global_cond, 
+        #                              lang_context_cond=None, traj_context_cond=traj_context_cond)
+        # else:
+        #     pred = self.model(noisy_trajectory, timesteps,local_cond=local_cond, global_cond=global_cond, 
+        #                              lang_context_cond=lang_context_cond, traj_context_cond=traj_context_cond)
 
 
         pred_type = self.noise_scheduler.config.prediction_type 

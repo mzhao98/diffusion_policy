@@ -522,12 +522,61 @@ class ReplayBuffer:
             self.episode_ends.resize(len(episode_ends)-1)
         else:
             self.episode_ends.resize(len(episode_ends)-1, refcheck=False)
+
+    def include_only_episode_indices(self, list_of_indices):
+        is_zarr = (self.backend == 'zarr')
+        episode_ends = self.episode_ends[:].copy()
+        # pdb.set_trace()
+        
+        
+        for key, value in self.data.items():
+            new_episode_ends = []
+            new_value = []
+            for idx in list_of_indices:
+                start_idx = 0
+                if idx > 0:
+                    start_idx = episode_ends[idx-1]
+                end_idx = episode_ends[idx]
+                len_episode = end_idx - start_idx
+                # print("len_episode", len_episode)
+                if len(new_episode_ends) == 0:
+                    new_episode_ends.append(len_episode)
+                else:
+                    new_episode_ends.append(len_episode + new_episode_ends[-1])
+                # pdb.set_trace()
+                for ep_sub_idx in range(start_idx, end_idx):
+                    new_value.append(value[ep_sub_idx])
+            new_shape = (len(new_value),) + value.shape[1:]
+            new_value = np.array(new_value)
+            # print(new_value.shape)
+            value = new_value
+            if is_zarr:
+                value.resize(new_shape)
+            else:
+                value.resize(new_shape, refcheck=False)
+            # set meta for data
+            self.data[key] = value
+            
+        episode_ends = np.array(new_episode_ends)
+        # pdb.set_trace()
+        
+        # set meta episode_ends
+        self.meta['episode_ends'] = episode_ends
+        if is_zarr:
+            self.episode_ends.resize(len(episode_ends))
+        else:
+            self.episode_ends.resize(len(episode_ends), refcheck=False)
+        # pdb.set_trace()
+        
+
+        
     
     def pop_episode(self):
         assert(self.n_episodes > 0)
         episode = self.get_episode(self.n_episodes-1, copy=True)
         self.drop_episode()
         return episode
+    
 
     def extend(self, data):
         self.add_episode(data)

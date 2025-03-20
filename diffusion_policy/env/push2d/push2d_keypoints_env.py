@@ -3,6 +3,7 @@ from gym import spaces
 from diffusion_policy.env.push2d.push2d_env import Push2dEnv
 from diffusion_policy.env.push2d.pymunk_keypoint_manager import PymunkKeypointManager
 import numpy as np
+import pdb
 
 class Push2dKeypointsEnv(Push2dEnv):
     def __init__(self,
@@ -83,8 +84,7 @@ class Push2dKeypointsEnv(Push2dEnv):
         if self.agent_keypoints:
             obj_map['agent'] = self.agent
 
-        kp_map = self.kp_manager.get_keypoints_global(
-            pose_map=obj_map, is_obj=True)
+        kp_map = self.kp_manager.get_keypoints_global(pose_map=obj_map, is_obj=True)
         # python dict guerentee order of keys and values
         kps = np.concatenate(list(kp_map.values()), axis=0)
 
@@ -121,6 +121,56 @@ class Push2dKeypointsEnv(Push2dEnv):
             obs, obs_mask.astype(obs.dtype)
         ], axis=0)
         return obs
+    
+
+    # def _render_obs(self, kp_obs):
+    #     # obs, obs_mask
+
+    #     self.reset() # obs is (40,)
+    #     obs_val = kp_obs[:-2]
+    #     # reshape obs_val to 9,2
+    #     obs_val = obs_val.reshape(-1, 2).cpu().numpy()
+    #     obs_pos = kp_obs[-2:]
+    #     draw_kp_map = {'block': obs_val}
+    #     img = np.zeros((self.window_size, self.window_size, 3), dtype=np.uint8)
+    #     scale = np.array(img.shape[:2]) / np.array([512,512])
+    #     obj_map = {
+    #         'block': self.block
+    #     }
+    #     # self.kp_manager.convert_keypoints_to_obj_pos(obj_map, self.block)
+    #     obj = self.block
+    #     af_transfrom_from_obj_to_keypts = self.kp_manager.get_tf_img_obj(obj)
+    #     kp_local = self.kp_manager.local_keypoint_map['block']
+    #     block_keypts = af_transfrom_from_obj_to_keypts(kp_local)
+    #     # invert the transformation
+    #     af_transfrom_from_keypts_to_obj = af_transfrom_from_obj_to_keypts.inverse
+    #     # convert the keypoints to object position
+    #     obj_keypts = af_transfrom_from_keypts_to_obj(obs_val)
+    #     # get matrix from affine transform
+    #     # matrix = af_transfrom_from_obj_to_keypts.params
+    #     # # convert rotation matrix in upper left 2x2 to angle
+    #     # rot_mat = matrix[:2,:2]
+    #     # angle = np.arctan2(rot_mat[1,0], rot_mat[0,0])
+    #     # # get the position of the object
+    #     # pos = matrix[:2,2]
+    #     # angle = angle * 180 / np.pi
+
+    #     # obj_keypts = af_transfrom_from_keypts_to_obj(block_keypts)
+    #     # pose_map = {'block': obj_keypts, 'agent': obs_pos}
+    #     # self.kp_manager.draw_keypoints_pose(img, pose_map, is_obj=True)
+    #     kp_global = self.kp_manager.get_keypoints_global(draw_kp_map, is_obj=False)
+
+
+    #     pdb.set_trace()
+    #     Do = kp_obs.shape[0] // 2
+    #     obs = kp_obs[:Do]
+    #     obs_mask = kp_obs[Do:]
+    #     obs = obs.reshape(-1, 2)
+    #     obs_mask = obs_mask.reshape(-1, 2)
+    #     img = np.zeros((self.window_size, self.window_size, 3), dtype=np.uint8)
+    #     img = self.kp_manager.draw_keypoints(img, draw_kp_map, radius=int(img.shape[0]/96))
+    #     return img
+        
     
     
     def _render_frame(self, mode):

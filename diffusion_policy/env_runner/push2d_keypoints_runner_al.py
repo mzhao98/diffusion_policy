@@ -47,9 +47,8 @@ class Push2dKeypointsRunner(BaseLowdimRunner):
         if n_envs is None:
             n_envs = n_train + n_test
 
-        
 
-        self.utterance = None
+
         self.savetag = None
         # handle latency step
         # to mimic latency, we request n_latency_steps additional steps 
@@ -110,7 +109,7 @@ class Push2dKeypointsRunner(BaseLowdimRunner):
                             'media', wv.util.generate_id() + "_train.mp4")
                     else:
                         filename = pathlib.Path(output_dir).joinpath(
-                            f'results/{self.savetag}/{self.utterance}', wv.util.generate_id() + "_train.mp4")
+                            f'results/{self.savetag}', wv.util.generate_id() + "_train.mp4")
                     filename.parent.mkdir(parents=False, exist_ok=True)
                     filename = str(filename)
                     env.env.file_path = filename
@@ -140,7 +139,7 @@ class Push2dKeypointsRunner(BaseLowdimRunner):
                             'media', wv.util.generate_id() + "_test.mp4")
                     else:
                         filename = pathlib.Path(output_dir).joinpath(
-                            f'results/{self.savetag}/{self.utterance}', wv.util.generate_id() + "_test.mp4")
+                            f'results/{self.savetag}', wv.util.generate_id() + "_test.mp4")
                         
                     filename.parent.mkdir(parents=False, exist_ok=True)
                     filename = str(filename)
@@ -188,7 +187,6 @@ class Push2dKeypointsRunner(BaseLowdimRunner):
         # get dimension of the hidden states
         self.dbert = 768
         self.set_up_context_encoder()
-
 
     def reset_inits(self, output_dir, savetag):
 
@@ -253,7 +251,6 @@ class Push2dKeypointsRunner(BaseLowdimRunner):
         self.env_prefixs = env_prefixs
         self.env_init_fn_dills = env_init_fn_dills
 
-
     def set_up_context_encoder(self):
         self.context_lookup = {}
         text_label = 'right'
@@ -272,18 +269,10 @@ class Push2dKeypointsRunner(BaseLowdimRunner):
         # store the embeddings
         self.context_lookup[text_label] = embeddings[0].cpu().numpy()
 
-
-    def add_utterance(self, utterance):
-        self.utterance = utterance
-        text_label = utterance
-        tokenized_inputs = self.tokenizer(text_label, padding=True, truncation=True, return_tensors="pt")
-        with torch.no_grad():
-            outputs = self.context_encoder(**tokenized_inputs)
-        embeddings = outputs.last_hidden_state[:, 0, :]
-        # store the embeddings
-        self.context_lookup[text_label] = embeddings[0].cpu().numpy()
+    def set_mode(self, mode):
+        self.strategy_mode = mode
     
-    def run(self, policy: BaseLowdimPolicy):
+    def run(self, policy: BaseLowdimPolicy, inv_model):
         device = policy.device
         dtype = policy.dtype
 
@@ -299,6 +288,7 @@ class Push2dKeypointsRunner(BaseLowdimRunner):
         all_rewards = [None] * n_inits
 
         # pdb.set_trace()
+        obs_to_diff = []
 
         for chunk_idx in range(n_chunks):
             start = chunk_idx * n_envs
@@ -321,32 +311,17 @@ class Push2dKeypointsRunner(BaseLowdimRunner):
             obs = env.reset()
             past_action = None
             policy.reset()
+            # move policy to device
+            policy.to(device)
 
             pbar = tqdm.tqdm(total=self.max_steps, desc=f"Eval Push2dKeypointsRunner {chunk_idx+1}/{n_chunks}", 
                 leave=False, mininterval=self.tqdm_interval_sec)
             done = False
             while not done:
                 Do = obs.shape[-1] // 2
-                # print("obs.shape", obs.shape)   
-                # Do=21
+                # print("obs.shape", obs.shape) 
+                # pdb.set_trace()  
 
-                # index_conditioning = np.ones((obs[...,:self.n_obs_steps,:Do].shape[0], 1), dtype=np.float32) * self.strategy_mode
-                # # add additional dim to index_conditioning
-                # index_conditioning = np.expand_dims(index_conditioning, axis=1)
-
-                # lang_conditioning_context = np.zeros((obs.shape[0], 1, self.dbert))
-                # for i in range(obs.shape[0]):
-                    
-                #     # text_1 = "Replace me by any text you'd like."
-                #     if self.strategy_mode % 2 == 0:
-                #         text_label = 'right'
-                #     else:
-                #         text_label = 'left'
-                #     lang_conditioning_context[i][0] = self.context_lookup[text_label]
-                # pdb.set_trace()
-                # lang_conditioning_context[:,0,:]
-                # expand dim=1 for lang_conditioning_context
-                # lang_conditioning_context = np.expand_dims(lang_conditioning_context, axis=0)
 
 
                 # create obs dict
@@ -354,11 +329,8 @@ class Push2dKeypointsRunner(BaseLowdimRunner):
                     # handle n_latency_steps by discarding the last n_latency_steps
                     'obs': obs[...,:self.n_obs_steps,:Do].astype(np.float32),
                     'obs_mask': obs[...,:self.n_obs_steps,Do:] > 0.5,
-                    # 'idx': index_conditioning,
-                    # 'utterance': lang_conditioning_context
                 }
-                # np_obs_dict['utterance'] = lang_conditioning_context.astype(np.float32)
-                # print("lang_conditioning_context", lang_conditioning_context.shape)
+                first_obs = np_obs_dict['obs']
 
 
                 if self.past_action and (past_action is not None):
@@ -371,11 +343,12 @@ class Push2dKeypointsRunner(BaseLowdimRunner):
                     lambda x: torch.from_numpy(x).to(
                         device=device))
                 # pdb.set_trace()
+                
 
                 # run policy
-                # with torch.no_grad():
+                with torch.no_grad():
                     # pdb.set_trace()
-                action_dict = policy.predict_action(obs_dict)
+                    action_dict = policy.predict_action(obs_dict)
 
                 # sample K actions, plot them as lines on a plot
                 # K = 3
@@ -408,10 +381,7 @@ class Push2dKeypointsRunner(BaseLowdimRunner):
 
                 # step env
                 obs, reward, done, info = env.step(action)
-                # print('action', action)
-                # print('list_of_sampled_actions', list_of_sampled_actions)
-                # obs, reward, done, info = env.step_with_samples(action, list_of_sampled_actions)
-                # obs, reward, done, info = env.step(action)
+
                 done = np.all(done)
                 past_action = action
 
@@ -454,151 +424,4 @@ class Push2dKeypointsRunner(BaseLowdimRunner):
             value = np.mean(value)
             log_data[name] = value
 
-        return log_data
-    
-    def run_train_eval(self, policy: BaseLowdimPolicy, utterance_to_use, use_weight_transform):
-
-        device = policy.device
-        dtype = policy.dtype
-
-        env = self.env
-
-        # plan for rollout
-        n_envs = len(self.env_fns)
-        n_inits = len(self.env_init_fn_dills)
-        n_chunks = math.ceil(n_inits / n_envs)
-
-        # allocate data
-        all_video_paths = [None] * n_inits
-        all_rewards = [None] * n_inits
-
-        # add utterance
-        self.add_utterance(utterance_to_use)
-
-
-        for chunk_idx in range(n_chunks):
-            start = chunk_idx * n_envs
-            end = min(n_inits, start + n_envs)
-            this_global_slice = slice(start, end)
-            this_n_active_envs = end - start
-            this_local_slice = slice(0,this_n_active_envs)
-            
-            this_init_fns = self.env_init_fn_dills[this_global_slice]
-            n_diff = n_envs - len(this_init_fns)
-            if n_diff > 0:
-                this_init_fns.extend([self.env_init_fn_dills[0]]*n_diff)
-            assert len(this_init_fns) == n_envs
-            # pdb.set_trace()
-
-            # init envs
-            env.call_each('run_dill_function', 
-                args_list=[(x,) for x in this_init_fns])
-            # run each init function
-
-
-            # start rollout
-            obs = env.reset()
-            past_action = None
-            policy.reset()
-
-            pbar = tqdm.tqdm(total=self.max_steps, desc=f"Eval Push2dKeypointsRunner {chunk_idx+1}/{n_chunks}", 
-                leave=False, mininterval=self.tqdm_interval_sec)
-            done = False
-            while not done:
-                Do = obs.shape[-1] // 2
-
-
-                lang_conditioning_context = np.zeros((obs.shape[0], 1, self.dbert))
-                for i in range(obs.shape[0]):
-                    lang_conditioning_context[i][0] = self.context_lookup[utterance_to_use]
-
-
-                # create obs dict
-                np_obs_dict = {
-                    # handle n_latency_steps by discarding the last n_latency_steps
-                    'obs': obs[...,:self.n_obs_steps,:Do].astype(np.float32),
-                    'obs_mask': obs[...,:self.n_obs_steps,Do:] > 0.5,
-                    # 'utterance': lang_conditioning_context
-                }
-                np_obs_dict['utterance'] = lang_conditioning_context.astype(np.float32)
-
-
-                if self.past_action and (past_action is not None):
-                    # TODO: not tested
-                    np_obs_dict['past_action'] = past_action[
-                        :,-(self.n_obs_steps-1):].astype(np.float32)
-                
-                # device transfer
-                obs_dict = dict_apply(np_obs_dict, 
-                    lambda x: torch.from_numpy(x).to(
-                        device=device))
-                # pdb.set_trace()
-
-                # run policy
-                # with torch.no_grad():
-                    # pdb.set_trace()
-                action_dict = policy.predict_action(obs_dict, use_weight_transform=use_weight_transform)
-
-                # device_transfer
-                np_action_dict = dict_apply(action_dict,
-                    lambda x: x.detach().to('cpu').numpy())
-
-                # handle latency_steps, we discard the first n_latency_steps actions
-                # to simulate latency
-                action = np_action_dict['action'][:,self.n_latency_steps:]
-
-                # step env
-                obs, reward, done, info = env.step(action)
-
-                done = np.all(done)
-                past_action = action
-
-                # update pbar
-                pbar.update(action.shape[1])
-            pbar.close()
-
-            # collect data for this round
-            all_video_paths[this_global_slice] = env.render()[this_local_slice]
-            all_rewards[this_global_slice] = env.call('get_attr', 'reward')[this_local_slice]
-        # import pdb; pdb.set_trace()
-
-        # log
-        max_rewards = collections.defaultdict(list)
-        log_data = dict()
-        # results reported in the paper are generated using the commented out line below
-        # which will only report and average metrics from first n_envs initial condition and seeds
-        # fortunately this won't invalidate our conclusion since
-        # 1. This bug only affects the variance of metrics, not their mean
-        # 2. All baseline methods are evaluated using the same code
-        # to completely reproduce reported numbers, uncomment this line:
-
-        # create folder for the utterance in results
-        # output_dir = self.output_dir
-        # save_tag_folder = output_dir + f'/results/{save_tag}'
-        # pathlib.Path(save_tag_folder).mkdir(parents=True, exist_ok=True)
-        # utterance_folder = output_dir + f'/results/{save_tag}/' + utterance_to_use
-        # pathlib.Path(utterance_folder).mkdir(parents=True, exist_ok=True)
-        
-
-        for i in range(len(self.env_fns)):
-        # and comment out this line
-        # for i in range(n_inits):
-            seed = self.env_seeds[i]
-            prefix = self.env_prefixs[i]
-            max_reward = np.max(all_rewards[i])
-            max_rewards[prefix].append(max_reward)
-            log_data[prefix+f'sim_max_reward_{seed}'] = max_reward
-
-            # visualize sim
-            video_path = all_video_paths[i]
-            if video_path is not None:
-                sim_video = wandb.Video(video_path)
-                log_data[prefix+f'sim_video_{seed}'] = sim_video
-
-        # log aggregate metrics
-        for prefix, value in max_rewards.items():
-            name = prefix+'mean_score'
-            value = np.mean(value)
-            log_data[name] = value
-
-        return log_data
+        return log_data, obs_to_diff

@@ -10,6 +10,7 @@ from diffusion_policy.model.diffusion.conv1d_components import (
 from diffusion_policy.model.diffusion.positional_embedding import SinusoidalPosEmb
 import pdb
 from transformers import BertTokenizer, BertModel
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +68,9 @@ class ConditionalResidualBlock1D(nn.Module):
         out = out + self.residual_conv(x)
         return out
 
-
+def temperature_scaled_softmax(logits, temperature=1.0):
+    logits = logits / temperature
+    return torch.softmax(logits, dim=0)
 
 class ConditionalUnet1D(nn.Module):
     def __init__(self, 
@@ -100,9 +103,9 @@ class ConditionalUnet1D(nn.Module):
         )
         self.traj_context_encoder = traj_context_encoder
         # context_encoder = nn.Embedding(2, dsed)
-        # self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+        self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
 
-        # self.lang_context_encoder = BertModel.from_pretrained("bert-base-uncased",output_hidden_states = True)
+        self.lang_context_encoder = BertModel.from_pretrained("bert-base-uncased",output_hidden_states = True)
         
         # Create MLP for encoding the language embedding
         dbert = 768
@@ -115,12 +118,16 @@ class ConditionalUnet1D(nn.Module):
         )
         self.lang_context_encoder = lang_context_encoder
         
+        
 
 
         # cond_dim = dsed
         cond_dim = dsed + dsed + dsed
+        # cond_dim = dsed + dsed
         if global_cond_dim is not None:
             cond_dim += global_cond_dim
+
+        self.global_cond_dim = global_cond_dim
 
         in_out = list(zip(all_dims[:-1], all_dims[1:]))
 
@@ -195,10 +202,62 @@ class ConditionalUnet1D(nn.Module):
         self.up_modules = up_modules
         self.down_modules = down_modules
         self.final_conv = final_conv
+        self.cluster_centers = [98,63]
+        self.n_clusters = 2
+        self.cluster_centers = ['right', 'left']
+        # self.n_clusters = 5
+        # self.cluster_centers = [34, 11, 68, 25, 93]
+        # self.n_clusters = 100
+        # self.cluster_centers = [54, 63, 38, 6, 75, 93, 57, 68, 65, 33, 21, 16, 96, 1, 4, 24, 14, 2, 94, 71, 42, 45, 17, 60, 80, 19, 22, 50, 40, 27, 74, 66, 35, 53, 5, 76, 81, 64, 18, 55, 62, 10, 15, 90, 72, 8, 31, 84, 43, 85, 11, 9, 79, 73, 82, 28, 83, 56, 49, 98, 26, 46, 91, 78, 52, 37, 88, 36, 41, 0, 13, 44, 29, 32, 92, 97, 25, 3, 51, 58, 12, 20, 67, 47, 86, 95, 61, 70, 48, 34, 77, 59, 30, 23, 7, 99, 39, 89, 87, 69]
+
+        # self.create_weight_transformer(self.n_clusters, self.cluster_centers)
 
         logger.info(
             "number of parameters: %e", sum(p.numel() for p in self.parameters())
         )
+
+    def create_obs_transformer(self):
+        global_cond_dim = self.global_cond_dim
+        self.obs_transformer = nn.Sequential(
+            nn.Mish(),
+            nn.Linear(global_cond_dim, global_cond_dim*2),
+            nn.Mish(),
+            nn.Linear(global_cond_dim*2, global_cond_dim*3),
+            nn.Mish(),
+            nn.Linear(global_cond_dim*3, global_cond_dim*2),
+            nn.Mish(),
+            nn.Linear(global_cond_dim*2, global_cond_dim),
+        )
+        # move to device
+        self.obs_transformer = self.obs_transformer.to(next(self.parameters()).device)
+
+    def create_weight_transformer(self, n_clusters, cluster_centers):
+        # self.weight_transformer = nn.Sequential(
+        #     nn.Linear(size_train, size_train),
+        #     nn.Softmax(dim=-1)
+        # )
+        self.n_clusters = n_clusters
+        self.cluster_centers = cluster_centers
+        
+        
+        global_cond_dim = self.global_cond_dim
+        self.weight_transformer = nn.Sequential(
+            nn.Mish(),
+            nn.Linear(global_cond_dim, global_cond_dim*2),
+            nn.Mish(),
+            nn.Linear(global_cond_dim*2, global_cond_dim*3),
+            nn.Mish(),
+            nn.Linear(global_cond_dim*3, global_cond_dim*2),
+            nn.Mish(),
+            nn.Linear(global_cond_dim*2, global_cond_dim),
+            nn.Mish(),
+            nn.Linear(global_cond_dim, global_cond_dim),
+            nn.Mish(),
+            nn.Linear(global_cond_dim, n_clusters),
+            nn.Softmax(dim=-1)
+        )
+        # move to device
+        self.weight_transformer = self.weight_transformer.to(next(self.parameters()).device)
 
     def forward(self, 
             sample: torch.Tensor, 
@@ -228,8 +287,14 @@ class ConditionalUnet1D(nn.Module):
         global_feature = self.diffusion_step_encoder(timesteps)
 
         # Handle trajectory conditioning
+        traj_context_cond = None
         if traj_context_cond is not None:
-            conditioning_context = traj_context_cond[:,0,0]
+            # pdb.set_trace()
+            # type is int or numpy int
+            if type(traj_context_cond) == int or type(traj_context_cond) == np.int64:
+                conditioning_context = torch.tensor([traj_context_cond], dtype=torch.long, device=sample.device)
+            else:
+                conditioning_context = traj_context_cond[:,0,0]
             # convert to long
             conditioning_context = conditioning_context.long()
             if not torch.is_tensor(conditioning_context):
@@ -245,7 +310,10 @@ class ConditionalUnet1D(nn.Module):
 
         # Handle language conditioning
         if lang_context_cond is not None:
-            lang_global_conditioning_context = lang_context_cond[:,0,:]
+            if len(lang_context_cond.shape) == 2:
+                lang_global_conditioning_context = lang_context_cond
+            else:
+                lang_global_conditioning_context = lang_context_cond[:,0,:]
             # pdb.set_trace()
             # convert to float
             lang_global_conditioning_context = lang_global_conditioning_context.float()
@@ -254,7 +322,10 @@ class ConditionalUnet1D(nn.Module):
         else:
             lang_global_conditioning_context = torch.zeros_like(global_feature)
 
-
+        # pdb.set_trace()
+        # global_cond = self.obs_transformer(global_cond)
+        # lang_global_conditioning_context = None
+        
         if global_cond is not None and lang_global_conditioning_context is not None and traj_global_conditioning_context is not None:
             # pdb.set_trace()
             global_feature = torch.cat([
@@ -273,6 +344,8 @@ class ConditionalUnet1D(nn.Module):
                 global_feature, global_cond
             ], axis=-1)
         
+        
+
         # encode local features
         h_local = list()
         if local_cond is not None:

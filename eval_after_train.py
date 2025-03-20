@@ -45,53 +45,6 @@ def main(checkpoint, output_dir, device):
     # pdb.set_trace()
     workspace.load_payload(payload, exclude_keys='optimizer', include_keys=None)
 
-    # set to original checkpoint
-    # original_ckpt = 'data/outputs/2025.02.18/17.48.31_train_diffusion_unet_lowdim_push2d_lowdim/checkpoints/latest.ckpt'
-    # original_ckpt = 'data/outputs/2025.02.21/03.01.50_train_diffusion_unet_lowdim_push2d_lowdim/checkpoints/latest.ckpt'
-    
-    # payload = torch.load(open(original_ckpt, 'rb'), pickle_module=dill)
-    # workspace.load_payload(payload, exclude_keys=None, include_keys=None)
-    # original_cfg = payload['cfg']
-
-    # # configure Training Demos dataset
-    # demos_dataset: BaseLowdimDataset
-    # cfg.task.dataset.use_target = False
-    # demos_dataset = hydra.utils.instantiate(original_cfg.task.dataset)
-    # train_dataloader = DataLoader(demos_dataset, **original_cfg.dataloader)
-    # print("len(train_dataset): ", len(demos_dataset))
-    # print("num eps", demos_dataset.replay_buffer.n_episodes)
-    # print("fg.task.dataset.train_zarr_path", original_cfg.task.dataset.zarr_path)
-
-
-    # configure Target Demos dataset
-    target_dataset: BaseLowdimDataset
-    cfg.task.dataset.use_target = True
-
-    # load target utterance_dict
-    filename_for_target_lang = cfg.task.dataset.target_zarr_path.split('.zarr')[0] + '_lang.pkl'
-    with open(filename_for_target_lang, 'rb') as f:
-        target_utterance_dict = pickle.load(f)
-
-    cfg.task.dataset.utterance_input = target_utterance_dict
-
-    target_dataset = hydra.utils.instantiate(cfg.task.dataset)
-    print("len(target_dataset): ", len(target_dataset))
-    # dataset.set_device(device)
-    assert isinstance(target_dataset, BaseLowdimDataset)
-    target_dataloader = DataLoader(target_dataset, **cfg.dataloader)
-    # target_normalizer = target_dataset.get_normalizer() We will not use target normalizer
-
-    demo_idx = 0
-    demo_end_idx = target_dataset.replay_buffer.episode_ends[demo_idx]
-    demo_data = target_dataset.replay_buffer.get_episode(0) # keys are keypoint, state, action
-
-    # configure validation dataset
-    val_dataset = target_dataset.get_validation_dataset()
-    val_dataloader = DataLoader(val_dataset, **cfg.val_dataloader)
-
-    
-
-
     
     # get policy from workspace
     policy = workspace.model
@@ -106,8 +59,8 @@ def main(checkpoint, output_dir, device):
     torch.manual_seed(0)
 
     cfg.task.env_runner.n_train = 0
-    cfg.task.env_runner.n_test = 1
-    cfg.task.env_runner.n_test_vis = 1
+    cfg.task.env_runner.n_test = 10
+    cfg.task.env_runner.n_test_vis = 10
     cfg.task.env_runner.max_steps = 400
     # pdb.set_trace()
     cfg.task.env_runner._target_ = 'diffusion_policy.env_runner.push2d_keypoints_runner_eval_w_langtraj.Push2dKeypointsRunner'
@@ -118,18 +71,17 @@ def main(checkpoint, output_dir, device):
         output_dir=output_dir)
     
     # set replay buffer
-    env_runner.set_target_replay_buffer(target_dataset, target_dataloader)
+    # env_runner.set_target_replay_buffer(target_dataset, target_dataloader)
     # env_runner.set_train_replay_buffer(demos_dataset, train_dataloader)
 
     # query for target traj idx
-    # traj_idx_to_use = int(input("Enter target traj idx: "))
+    traj_idx_to_use = int(input("Enter target traj idx: "))
 
     # utterance_to_use = target_utterance_dict[demo_idx]
     # utterance_to_use = "right"
-    use_weight_transform = True
-    runner_log, total_divergence = env_runner.run_with_target(policy, use_weight_transform)
+    # runner_log, total_divergence = env_runner.run_with_target(policy, traj_idx_to_use, False)
     # print("total_divergence", total_divergence)
-    # runner_log = env_runner.run(policy, traj_idx_to_use)
+    runner_log = env_runner.run(policy, traj_idx_to_use)
     # runner_log = env_runner.run_w_context_opt(policy, utterance_to_use)
     # runner_log = env_runner.run_w_lang_opt(policy, utterance_to_use, 0)
     

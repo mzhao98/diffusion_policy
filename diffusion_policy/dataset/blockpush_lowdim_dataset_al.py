@@ -25,27 +25,52 @@ class BlockPushLowdimDataset(BaseLowdimDataset):
         
         # pdb.set_trace()
         super().__init__()
-        self.replay_buffer = ReplayBuffer.copy_from_path(zarr_path, keys=[obs_key, action_key])
+        self.original_replay_buffer = ReplayBuffer.copy_from_path(zarr_path, keys=[obs_key, action_key])
 
-        val_mask = get_val_mask(
-            n_episodes=self.replay_buffer.n_episodes, 
-            val_ratio=val_ratio,
-            seed=seed)
-        train_mask = ~val_mask
-        self.sampler = SequenceSampler(
-            replay_buffer=self.replay_buffer, 
-            sequence_length=horizon,
-            pad_before=pad_before, 
-            pad_after=pad_after,
-            episode_mask=train_mask)
+        self.horizon = horizon
+        self.pad_before = pad_before
+        self.pad_after = pad_after
         self.obs_key = obs_key
         self.action_key = action_key
         self.obs_eef_target = obs_eef_target
         self.use_manual_normalizer = use_manual_normalizer
-        self.train_mask = train_mask
+        self.val_ratio = val_ratio
+        self.seed = seed
+        
+        self.obs_key = obs_key
+        self.action_key = action_key
+        self.obs_eef_target = obs_eef_target
+        self.use_manual_normalizer = use_manual_normalizer
+        
         self.horizon = horizon
         self.pad_before = pad_before
         self.pad_after = pad_after
+
+    def set_subset(self, episode_idxs):
+        # create copy of replay buffer
+        self.replay_buffer = copy.deepcopy(self.original_replay_buffer)
+        list_to_include = []
+        for ep_idx in range(self.original_replay_buffer.n_episodes):
+            if ep_idx in episode_idxs:
+                list_to_include.append(ep_idx)
+        self.replay_buffer.include_only_episode_indices(list_to_include)
+        # pdb.set_trace()
+        self.initialize_after_subset()
+        
+
+    def initialize_after_subset(self):
+        val_mask = get_val_mask(
+            n_episodes=self.replay_buffer.n_episodes, 
+            val_ratio=self.val_ratio,
+            seed=self.seed)
+        train_mask = ~val_mask
+        self.sampler = SequenceSampler(
+            replay_buffer=self.replay_buffer, 
+            sequence_length=self.horizon,
+            pad_before=self.pad_before, 
+            pad_after=self.pad_after,
+            episode_mask=train_mask)
+        self.train_mask = train_mask
 
     def get_validation_dataset(self):
         val_set = copy.copy(self)

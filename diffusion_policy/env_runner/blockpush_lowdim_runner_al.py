@@ -46,6 +46,14 @@ class BlockPushLowdimRunner(BaseLowdimRunner):
 
         task_fps = 10
         steps_per_render = max(10 // fps, 1)
+        self.n_train = n_train
+        self.n_train_vis = n_train_vis
+        self.train_start_seed = train_start_seed
+        self.n_test = n_test
+        self.n_test_vis = n_test_vis
+        self.test_start_seed = test_start_seed
+
+
 
         def env_fn():
             return MultiStepWrapper(
@@ -147,6 +155,129 @@ class BlockPushLowdimRunner(BaseLowdimRunner):
         self.tqdm_interval_sec = tqdm_interval_sec
         self.obs_eef_target = obs_eef_target
 
+    def reset_inits(self, output_dir, savetag):
+
+        env_seeds = list()
+        env_prefixs = list()
+        env_init_fn_dills = list()
+
+        # train
+        for i in range(self.n_train):
+            seed = self.train_start_seed + i
+            enable_render = i < self.n_train_vis
+
+            def init_fn(env, seed=seed, enable_render=enable_render):
+                # setup rendering
+                # video_wrapper
+                assert isinstance(env.env, VideoRecordingWrapper)
+                env.env.video_recoder.stop()
+                env.env.file_path = None
+                if enable_render:
+                    filename = pathlib.Path(output_dir).joinpath(
+                        f'results/{savetag}', wv.util.generate_id() + "_train.mp4")
+                    filename.parent.mkdir(parents=False, exist_ok=True)
+                    filename = str(filename)
+                    env.env.file_path = filename
+
+                # set seed
+                assert isinstance(env, MultiStepWrapper)
+                env.seed(seed)
+            
+            env_seeds.append(seed)
+            env_prefixs.append('train/')
+            env_init_fn_dills.append(dill.dumps(init_fn))def reset_inits(self, output_dir, savetag):
+
+        env_seeds = list()
+        env_prefixs = list()
+        env_init_fn_dills = list()
+
+        # train
+        for i in range(self.n_train):
+            seed = self.train_start_seed + i
+            enable_render = i < self.n_train_vis
+
+            def init_fn(env, seed=seed, enable_render=enable_render):
+                # setup rendering
+                # video_wrapper
+                assert isinstance(env.env, VideoRecordingWrapper)
+                env.env.video_recoder.stop()
+                env.env.file_path = None
+                if enable_render:
+                    filename = pathlib.Path(output_dir).joinpath(
+                        f'results/{savetag}', wv.util.generate_id() + "_train.mp4")
+                    filename.parent.mkdir(parents=False, exist_ok=True)
+                    filename = str(filename)
+                    env.env.file_path = filename
+
+                # set seed
+                assert isinstance(env, MultiStepWrapper)
+                env.seed(seed)
+            
+            env_seeds.append(seed)
+            env_prefixs.append('train/')
+            env_init_fn_dills.append(dill.dumps(init_fn))
+
+        # test
+        for i in range(self.n_test):
+            seed = self.test_start_seed + i
+            enable_render = i < self.n_test_vis
+
+            def init_fn(env, seed=seed, enable_render=enable_render):
+                # setup rendering
+                # video_wrapper
+                assert isinstance(env.env, VideoRecordingWrapper)
+                env.env.video_recoder.stop()
+                env.env.file_path = None
+                if enable_render:
+                    filename = pathlib.Path(output_dir).joinpath(
+                        f'results/{savetag}', wv.util.generate_id() + "_test.mp4")
+                        
+                    filename.parent.mkdir(parents=False, exist_ok=True)
+                    filename = str(filename)
+                    env.env.file_path = filename
+
+                # set seed
+                assert isinstance(env, MultiStepWrapper)
+                env.seed(seed)
+
+            env_seeds.append(seed)
+            env_prefixs.append('test/')
+            env_init_fn_dills.append(dill.dumps(init_fn))
+        
+        self.env_seeds = env_seeds
+        self.env_prefixs = env_prefixs
+        self.env_init_fn_dills = env_init_fn_dills
+
+        # test
+        for i in range(self.n_test):
+            seed = self.test_start_seed + i
+            enable_render = i < self.n_test_vis
+
+            def init_fn(env, seed=seed, enable_render=enable_render):
+                # setup rendering
+                # video_wrapper
+                assert isinstance(env.env, VideoRecordingWrapper)
+                env.env.video_recoder.stop()
+                env.env.file_path = None
+                if enable_render:
+                    filename = pathlib.Path(output_dir).joinpath(
+                        f'results/{savetag}', wv.util.generate_id() + "_test.mp4")
+                        
+                    filename.parent.mkdir(parents=False, exist_ok=True)
+                    filename = str(filename)
+                    env.env.file_path = filename
+
+                # set seed
+                assert isinstance(env, MultiStepWrapper)
+                env.seed(seed)
+
+            env_seeds.append(seed)
+            env_prefixs.append('test/')
+            env_init_fn_dills.append(dill.dumps(init_fn))
+        
+        self.env_seeds = env_seeds
+        self.env_prefixs = env_prefixs
+        self.env_init_fn_dills = env_init_fn_dills
 
     def run(self, policy: BaseLowdimPolicy):
         device = policy.device

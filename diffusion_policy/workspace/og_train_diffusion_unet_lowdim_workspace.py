@@ -30,11 +30,9 @@ from diffusion_policy.common.json_logger import JsonLogger
 from diffusion_policy.model.common.lr_scheduler import get_scheduler
 from diffusers.training_utils import EMAModel
 import pdb
-
 OmegaConf.register_new_resolver("eval", eval, replace=True)
 
-
-
+# %%
 class TrainDiffusionUnetLowdimWorkspace(BaseWorkspace):
     include_keys = ['global_step', 'epoch']
 
@@ -62,27 +60,19 @@ class TrainDiffusionUnetLowdimWorkspace(BaseWorkspace):
         self.global_step = 0
         self.epoch = 0
 
-
     def run(self):
         cfg = copy.deepcopy(self.cfg)
 
         # resume training
         if cfg.training.resume:
             lastest_ckpt_path = self.get_checkpoint_path()
-            # lastest_ckpt_path = 'data/outputs/2025.02.04/22.51.29_train_diffusion_unet_lowdim_push2d_lowdim/checkpoints/epoch=0030-test_mean_score=0.644.ckpt'
-            # lastest_ckpt_path = 'data/outputs/2025.02.04/23.52.42_train_diffusion_unet_lowdim_push2d_lowdim/checkpoints/epoch=0060-test_mean_score=0.827.ckpt'
-            # lastest_ckpt_path = 'data/outputs/2025.02.05/01.05.38_train_diffusion_unet_lowdim_push2d_lowdim/checkpoints/epoch=0090-test_mean_score=0.864.ckpt'
-            # lastest_ckpt_path = 'data/outputs/2025.02.05/22.00.31_train_diffusion_unet_lowdim_push2d_lowdim/checkpoints/latest.ckpt'
             if lastest_ckpt_path.is_file():
                 print(f"Resuming from checkpoint {lastest_ckpt_path}")
                 self.load_checkpoint(path=lastest_ckpt_path)
 
         # configure dataset
-        device = torch.device(cfg.training.device)
-        
         dataset: BaseLowdimDataset
         dataset = hydra.utils.instantiate(cfg.task.dataset)
-        # dataset.set_device(device)
         assert isinstance(dataset, BaseLowdimDataset)
         train_dataloader = DataLoader(dataset, **cfg.dataloader)
         normalizer = dataset.get_normalizer()
@@ -141,7 +131,7 @@ class TrainDiffusionUnetLowdimWorkspace(BaseWorkspace):
         )
 
         # device transfer
-        
+        device = torch.device(cfg.training.device)
         self.model.to(device)
         if self.ema_model is not None:
             self.ema_model.to(device)
@@ -159,7 +149,6 @@ class TrainDiffusionUnetLowdimWorkspace(BaseWorkspace):
             cfg.training.val_every = 1
             cfg.training.sample_every = 1
 
-
         # training loop
         log_path = os.path.join(self.output_dir, 'logs.json.txt')
         with JsonLogger(log_path) as json_logger:
@@ -171,26 +160,13 @@ class TrainDiffusionUnetLowdimWorkspace(BaseWorkspace):
                         leave=False, mininterval=cfg.training.tqdm_interval_sec) as tepoch:
                     for batch_idx, batch in enumerate(tepoch):
                         # device transfer
+                        # pdb.set_trace()
                         batch = dict_apply(batch, lambda x: x.to(device, non_blocking=True))
                         if train_sampling_batch is None:
                             train_sampling_batch = batch
 
-                        obs_input = batch['obs']
-                        obs_input = obs_input.view(obs_input.shape[0], -1)
-                        
-                        # get new classifier output
-                        # transfer to device 
-                        obs_input = obs_input.to(torch.device(cfg.training.device))
-                        # pred_class = self.context_classifier(obs_input, batch['action'].view(batch['action'].shape[0], -1))
-                        # take argmax
-                        # pred_class = torch.argmax(pred_class, dim=1)*9
-
-                        # batch['idx'] = pred_class
-                        # pdb.set_trace()
-                        
-
                         # compute loss
-                        raw_loss = self.model.compute_loss_with_cfg(batch)
+                        raw_loss = self.model.compute_loss(batch)
                         loss = raw_loss / cfg.training.gradient_accumulate_every
                         loss.backward()
 
@@ -251,8 +227,7 @@ class TrainDiffusionUnetLowdimWorkspace(BaseWorkspace):
                                 leave=False, mininterval=cfg.training.tqdm_interval_sec) as tepoch:
                             for batch_idx, batch in enumerate(tepoch):
                                 batch = dict_apply(batch, lambda x: x.to(device, non_blocking=True))
-                                # pdb.set_trace()
-                                loss = self.model.compute_loss_with_cfg(batch)
+                                loss = self.model.compute_loss(batch)
                                 val_losses.append(loss)
                                 if (cfg.training.max_val_steps is not None) \
                                     and batch_idx >= (cfg.training.max_val_steps-1):
@@ -263,35 +238,31 @@ class TrainDiffusionUnetLowdimWorkspace(BaseWorkspace):
                             step_log['val_loss'] = val_loss
 
                 # run diffusion sampling on a training batch
-                # if (self.epoch % cfg.training.sample_every) == 0:
-                #     with torch.no_grad():
-                #         # sample trajectory from training set, and evaluate difference
-                #         batch = train_sampling_batch
-                #         obs_dict = {'obs': batch['obs']}
-                #         gt_action = batch['action']
-                #         obs_dict['idx'] = batch['idx']
-                #         # squeeze the dimension at 1
-                #         obs_dict['obs'] = obs_dict['obs'].squeeze(1)
-                #         # pdb.set_trace()
+                if (self.epoch % cfg.training.sample_every) == 0:
+                    with torch.no_grad():
+                        # sample trajectory from training set, and evaluate difference
+                        batch = train_sampling_batch
+                        obs_dict = {'obs': batch['obs']}
+                        gt_action = batch['action']
                         
-                #         result = policy.predict_action(obs_dict)
-                #         if cfg.pred_action_steps_only:
-                #             pred_action = result['action']
-                #             start = cfg.n_obs_steps - 1
-                #             end = start + cfg.n_action_steps
-                #             gt_action = gt_action[:,start:end]
-                #         else:
-                #             pred_action = result['action_pred']
-                #         mse = torch.nn.functional.mse_loss(pred_action, gt_action)
-                #         # log
-                #         step_log['train_action_mse_error'] = mse.item()
-                #         # release RAM
-                #         del batch
-                #         del obs_dict
-                #         del gt_action
-                #         del result
-                #         del pred_action
-                #         del mse
+                        result = policy.predict_action(obs_dict)
+                        if cfg.pred_action_steps_only:
+                            pred_action = result['action']
+                            start = cfg.n_obs_steps - 1
+                            end = start + cfg.n_action_steps
+                            gt_action = gt_action[:,start:end]
+                        else:
+                            pred_action = result['action_pred']
+                        mse = torch.nn.functional.mse_loss(pred_action, gt_action)
+                        # log
+                        step_log['train_action_mse_error'] = mse.item()
+                        # release RAM
+                        del batch
+                        del obs_dict
+                        del gt_action
+                        del result
+                        del pred_action
+                        del mse
                 
                 # checkpoint
                 if (self.epoch % cfg.training.checkpoint_every) == 0:

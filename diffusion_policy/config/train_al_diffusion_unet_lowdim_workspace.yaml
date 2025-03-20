@@ -1,14 +1,14 @@
 defaults:
   - _self_
-  - task: target_push2d_lowdim
+  - task: push2d_lowdim_al
 
-name: finetune_diffusion_unet_lowdim
-_target_: diffusion_policy.workspace.finetune_langtraj_cfg_diffusion_unet_lowdim_workspace.TrainDiffusionUnetLowdimWorkspace
+name: train_diffusion_unet_lowdim
+_target_: diffusion_policy.workspace.train_online_al_forw_inv_diffusion_unet_lowdim_workspace.TrainDiffusionUnetLowdimWorkspace
 
 obs_dim: 20
 action_dim: 2
 keypoint_dim: 2
-task_name: push2d_lowdim
+task_name: push2d_lowdim_al
 exp_name: "default"
 
 horizon: 16
@@ -22,10 +22,10 @@ obs_as_global_cond: True
 pred_action_steps_only: False
 
 policy:
-  _target_: diffusion_policy.policy.diffusion_unet_finetune_lowdim_policy_w_langtraj.DiffusionUnetLowdimPolicy
+  _target_: diffusion_policy.policy.diffusion_unet_lowdim_policy_al.DiffusionUnetLowdimPolicy
 
   model:
-    _target_: diffusion_policy.model.diffusion.conditional_unet1d_w_langtraj.ConditionalUnet1D
+    _target_: diffusion_policy.model.diffusion.conditional_unet1d_al.ConditionalUnet1D
     input_dim: "${eval: ${action_dim} if ${obs_as_local_cond} or ${obs_as_global_cond} else ${task.obs_dim} + ${task.action_dim}}"
     local_cond_dim: "${eval: ${obs_dim} if ${obs_as_local_cond} else None}"
     global_cond_dim: "${eval: ${obs_dim}*${n_obs_steps} if ${obs_as_global_cond} else None}"
@@ -83,7 +83,7 @@ val_dataloader:
 
 optimizer:
   _target_: torch.optim.AdamW
-  lr: 1.0e-3
+  lr: 1.0e-4
   betas: [0.95, 0.999]
   eps: 1.0e-8
   weight_decay: 1.0e-6
@@ -101,8 +101,8 @@ training:
   use_ema: True
   # training loop control
   # in epochs
-  rollout_every: 5
-  checkpoint_every: 10
+  rollout_every: 50
+  checkpoint_every: 50
   val_every: 1
   sample_every: 5
   # steps per epoch

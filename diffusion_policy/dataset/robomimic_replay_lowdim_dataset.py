@@ -17,6 +17,7 @@ from diffusion_policy.common.normalize_util import (
     get_identity_normalizer_from_stat,
     array_to_stats
 )
+import pdb
 
 class RobomimicReplayLowdimDataset(BaseLowdimDataset):
     def __init__(self,
@@ -126,6 +127,7 @@ class RobomimicReplayLowdimDataset(BaseLowdimDataset):
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         data = self.sampler.sample_sequence(idx)
         torch_data = dict_apply(data, torch.from_numpy)
+        # convert to Torch.LongTensor
         return torch_data
 
 def normalizer_from_stat(stat):

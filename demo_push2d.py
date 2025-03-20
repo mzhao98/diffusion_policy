@@ -32,10 +32,13 @@ def main(output, render_size, control_hz):
     env = Push2dKeypointsEnv(render_size=render_size, render_action=False, **kp_kwargs)
     agent = env.teleop_agent()
     clock = pygame.time.Clock()
+
+    buffer_idx = int(input("Enter buffer index: "))
     
     print("num eps", replay_buffer.n_episodes)
     # episode-level while loop
-    for buffer_idx in reversed(range(replay_buffer.n_episodes)):
+    # for buffer_idx in (range(replay_buffer.n_episodes)):
+    for buffer_idx in range(buffer_idx, buffer_idx+1):
         # record in seed order, starting with 0
         # seed = replay_buffer.n_episodes
         # buffer_idx = 0

@@ -208,12 +208,12 @@ class DiffusionUnetLowdimPolicy(BaseLowdimPolicy):
             context_conditioning = obs_dict['idx']
             traj_ncond = context_conditioning.float()
 
-        if 'utterance' not in obs_dict:
-            lang_ncond = None
-        else:
-            context_conditioning = obs_dict['utterance']
-            # to float
-            lang_ncond = context_conditioning.float()
+        # if 'utterance' not in obs_dict:
+        #     lang_ncond = None
+        # else:
+        #     context_conditioning = obs_dict['utterance']
+        #     # to float
+        #     lang_ncond = context_conditioning.float()
 
 
         # build input
@@ -255,7 +255,7 @@ class DiffusionUnetLowdimPolicy(BaseLowdimPolicy):
             cond_mask,
             local_cond=local_cond,
             global_cond=global_cond,
-            lang_context_cond=lang_ncond,
+            # lang_context_cond=lang_ncond,
             traj_context_cond=traj_ncond,
             **self.kwargs)
         
@@ -368,7 +368,7 @@ class DiffusionUnetLowdimPolicy(BaseLowdimPolicy):
         assert 'valid_mask' not in batch
         
         traj_context_cond = batch['idx']
-        lang_context_cond = batch['utterance']
+        # lang_context_cond = batch['utterance']
         # drop 'idx' from batch
         batch = {k: v for k, v in batch.items() if k not in ['idx', 'utterance']}
         nbatch = self.normalizer.normalize(batch)
@@ -451,14 +451,12 @@ class DiffusionUnetLowdimPolicy(BaseLowdimPolicy):
         # pred =  (1 + w) * (pred_with_class) - (w) * (pred_without_class)
         rand_p = torch.rand(1).item()
         rand_q = torch.rand(1).item()
+        lang_context_cond = None
 
-        if rand_p < 0.2:
-            if rand_q < 0.5:
-                pred = self.model(noisy_trajectory, timesteps,local_cond=local_cond, global_cond=global_cond, 
+        if rand_p < 0.5:
+            pred = self.model(noisy_trajectory, timesteps,local_cond=local_cond, global_cond=global_cond, 
                                      lang_context_cond=lang_context_cond, traj_context_cond=None)
-            else:
-                pred = self.model(noisy_trajectory, timesteps,local_cond=local_cond, global_cond=global_cond, 
-                                     lang_context_cond=None, traj_context_cond=traj_context_cond)
+                
         else:
             pred = self.model(noisy_trajectory, timesteps,local_cond=local_cond, global_cond=global_cond, 
                                      lang_context_cond=lang_context_cond, traj_context_cond=traj_context_cond)

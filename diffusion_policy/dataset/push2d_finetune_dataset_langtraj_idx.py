@@ -160,6 +160,8 @@ class Push2dLowdimDataset(BaseLowdimDataset):
             else:
                 text_label = 'left'
 
+            # pdb.set_trace()
+
             if self.utterance_input is not None:
                 # pdb.set_trace()
                 # print("utterance input", self.utterance_input)

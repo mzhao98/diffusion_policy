@@ -6,7 +6,7 @@ import pygame
 from matplotlib import cm
 import cv2
 from diffusion_policy.env.pusht.pymunk_override import DrawOptions
-
+import pdb
 
 def farthest_point_sampling(points: np.ndarray, n_points: int, init_idx: int):
     """
@@ -113,6 +113,7 @@ class PymunkKeypointManager:
             kp_map[key] = kp_global
         return kp_map
     
+
     def draw_keypoints(self, img, kps_map, radius=1):
         scale = np.array(img.shape[:2]) / np.array([512,512])
         for key, value in kps_map.items():

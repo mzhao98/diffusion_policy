@@ -147,6 +147,11 @@ class BlockPushLowdimRunner(BaseLowdimRunner):
         self.tqdm_interval_sec = tqdm_interval_sec
         self.obs_eef_target = obs_eef_target
 
+    def set_save_tag_folder(self, savetag):
+        self.savetag_folder = savetag
+
+    def set_episode_folder(self, epi_savetag):
+        self.episode_save_folder = epi_savetag
 
     def run(self, policy: BaseLowdimPolicy):
         device = policy.device

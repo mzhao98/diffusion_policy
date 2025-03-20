@@ -161,13 +161,16 @@ class Push2dKeypointsRunner(BaseLowdimRunner):
         self.past_action = past_action
         self.max_steps = max_steps
         self.tqdm_interval_sec = tqdm_interval_sec
-        self.strategy_mode = 1
+        # self.strategy_mode = 1
         self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
 
         self.context_encoder = BertModel.from_pretrained("bert-base-uncased",output_hidden_states = True)
         # get dimension of the hidden states
         self.dbert = 768
         self.set_up_context_encoder()
+
+    
+
 
     def set_target_replay_buffer(self, target_dataset, target_dataloader):
         self.target_dataset = target_dataset
@@ -212,11 +215,9 @@ class Push2dKeypointsRunner(BaseLowdimRunner):
         embeddings = outputs.last_hidden_state[:, 0, :]
         # store the embeddings
         self.context_lookup[text_label] = embeddings[0].cpu().numpy()
-
-    def set_mode(self, mode):
-        self.strategy_mode = mode
     
-    def run(self, policy: BaseLowdimPolicy, utterance_to_use):
+
+    def run(self, policy: BaseLowdimPolicy, traj_idx_to_use):
         device = policy.device
         dtype = policy.dtype
 
@@ -250,9 +251,9 @@ class Push2dKeypointsRunner(BaseLowdimRunner):
             env.call_each('run_dill_function', 
                 args_list=[(x,) for x in this_init_fns])
             
-            self.add_utterance(utterance_to_use)
+            # self.add_utterance(utterance_to_use)
 
-            obs = env.seed(0)
+            # obs = env.seed(0)
 
 
             # start rollout
@@ -266,23 +267,23 @@ class Push2dKeypointsRunner(BaseLowdimRunner):
             while not done:
                 Do = obs.shape[-1] // 2
 
-                index_conditioning = np.ones((obs[...,:self.n_obs_steps,:Do].shape[0], 1), dtype=np.float32) * self.strategy_mode
+                index_conditioning = np.ones((obs[...,:self.n_obs_steps,:Do].shape[0], 1), dtype=np.float32) * traj_idx_to_use
                 # add additional dim to index_conditioning
                 index_conditioning = np.expand_dims(index_conditioning, axis=1)
 
-                lang_conditioning_context = np.zeros((obs.shape[0], 1, self.dbert))
-                for i in range(obs.shape[0]):
-                    lang_conditioning_context[i][0] = self.context_lookup[utterance_to_use]
+                # lang_conditioning_context = np.zeros((obs.shape[0], 1, self.dbert))
+                # for i in range(obs.shape[0]):
+                #     lang_conditioning_context[i][0] = self.context_lookup[utterance_to_use]
 
                 # create obs dict
                 np_obs_dict = {
                     # handle n_latency_steps by discarding the last n_latency_steps
                     'obs': obs[...,:self.n_obs_steps,:Do].astype(np.float32),
                     'obs_mask': obs[...,:self.n_obs_steps,Do:] > 0.5,
-                    # 'idx': index_conditioning,
-                    'utterance': lang_conditioning_context
+                    'idx': index_conditioning,
+                    # 'utterance': lang_conditioning_context
                 }
-                np_obs_dict['utterance'] = lang_conditioning_context.astype(np.float32)
+                # np_obs_dict['utterance'] = lang_conditioning_context.astype(np.float32)
 
                 if self.past_action and (past_action is not None):
                     # TODO: not tested
@@ -565,7 +566,7 @@ class Push2dKeypointsRunner(BaseLowdimRunner):
         return log_data
 
 
-    def run_with_target(self, policy: BaseLowdimPolicy, utterance_to_use):
+    def run_with_target(self, policy: BaseLowdimPolicy, use_weight_transform):
         device = policy.device
         dtype = policy.dtype
 
@@ -612,7 +613,7 @@ class Push2dKeypointsRunner(BaseLowdimRunner):
             done = False
             iter_idx = 0
 
-            self.add_utterance(utterance_to_use)
+            # self.add_utterance(utterance_to_use)
 
             # for buffer_idx in range(replay_buffer.n_episodes):
             buffer_idx = 0
@@ -633,7 +634,7 @@ class Push2dKeypointsRunner(BaseLowdimRunner):
             # pdb.set_trace()
             
 
-            for t in range(buffer_idx_start, buffer_idx_end-8, 8):
+            for t in range(buffer_idx_start, buffer_idx_end, 8):
                 
                 obs_to_replay = self.target_dataset[t]['obs'][:self.n_obs_steps,:]
                 obs_to_replay = obs_to_replay.unsqueeze(0) # 1, 16, 20
@@ -650,23 +651,24 @@ class Push2dKeypointsRunner(BaseLowdimRunner):
                 # self.render_obs(env, obs, past_action)
                 Do = obs.shape[-1] // 2
 
-                index_conditioning = np.ones((obs[...,:self.n_obs_steps,:Do].shape[0], 1), dtype=np.float32) * self.strategy_mode
-                # add additional dim to index_conditioning
-                index_conditioning = np.expand_dims(index_conditioning, axis=1)
+                # index_conditioning = np.ones((obs[...,:self.n_obs_steps,:Do].shape[0], 1), dtype=np.float32) * self.strategy_mode
+                # # add additional dim to index_conditioning
+                # index_conditioning = np.expand_dims(index_conditioning, axis=1)
 
-                lang_conditioning_context = np.zeros((obs.shape[0], 1, self.dbert))
-                for i in range(obs.shape[0]):
-                    lang_conditioning_context[i][0] = self.context_lookup[utterance_to_use]
+                # lang_conditioning_context = np.zeros((obs.shape[0], 1, self.dbert))
+                # for i in range(obs.shape[0]):
+                #     lang_conditioning_context[i][0] = self.context_lookup[utterance_to_use]
 
                 # create obs dict
                 np_obs_dict = {
                     # handle n_latency_steps by discarding the last n_latency_steps
                     'obs': obs[...,:self.n_obs_steps,:Do].astype(np.float32),
                     'obs_mask': obs[...,:self.n_obs_steps,Do:] > 0.5,
-                    'idx': index_conditioning,
-                    'utterance': lang_conditioning_context
+                    # 'idx': index_conditioning,
+                    # 'utterance': lang_conditioning_context
                 }
-                np_obs_dict['utterance'] = lang_conditioning_context.astype(np.float32)
+                # np_obs_dict['utterance'] = lang_conditioning_context.astype(np.float32)
+                np_obs_dict['obs'] = obs_to_replay.cpu().numpy()
 
 
                 if self.past_action and (past_action is not None):
@@ -681,16 +683,16 @@ class Push2dKeypointsRunner(BaseLowdimRunner):
 
                 # run policy
                 with torch.no_grad():
-                    action_dict = policy.predict_action(obs_dict)
+                    action_dict = policy.predict_action(obs_dict, use_weight_transform)
 
                 
 
                 # sample K actions, plot them as lines on a plot
-                K = 6
+                K = 1
                 list_of_sampled_actions = []
                 list_of_sampled_likelihoods = []
                 for k in range(K):
-                    action_sample_dict = policy.predict_action(obs_dict)
+                    action_sample_dict = policy.predict_action(obs_dict, use_weight_transform)
                     obs_dict['action'] = action_sample_dict['action']
                     # drop obs mask
                     if 'obs_mask' in obs_dict:
@@ -763,9 +765,9 @@ class Push2dKeypointsRunner(BaseLowdimRunner):
                 print("Divergence between sampled actions and ground truth action: ", divergence)
                 
 
-                subtimestep_to_kde = self.render_obs_with_samples(env, obs, gt_action, 
-                                                                list_of_sampled_actions, buffer_idx, iter_idx, utterance_to_use, 
-                                                                list_of_sampled_likelihoods)
+                # subtimestep_to_kde = self.render_obs_with_samples(env, obs, gt_action, 
+                #                                                 list_of_sampled_actions, buffer_idx, iter_idx, utterance_to_use, 
+                #                                                 list_of_sampled_likelihoods)
             
 
                 obs, reward, done, info = env.step(action)

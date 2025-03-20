@@ -26,63 +26,60 @@ class Push2dLowdimDataset(BaseLowdimDataset):
             max_train_episodes=None
             ):
         super().__init__()
-        self.replay_buffer = ReplayBuffer.copy_from_path(
+        self.original_replay_buffer = ReplayBuffer.copy_from_path(
             zarr_path, keys=[obs_key, state_key, action_key])
         
-        
-
-        val_mask = get_val_mask(
-            n_episodes=self.replay_buffer.n_episodes, 
-            val_ratio=val_ratio,
-            seed=seed)
-        train_mask = ~val_mask
-        train_mask = downsample_mask(
-            mask=train_mask, 
-            max_n=max_train_episodes, 
-            seed=seed)
-
-        self.sampler = SequenceSampler(
-            replay_buffer=self.replay_buffer, 
-            sequence_length=horizon,
-            pad_before=pad_before, 
-            pad_after=pad_after,
-            episode_mask=train_mask
-            )
-        self.obs_key = obs_key
-        self.state_key = state_key
-        self.action_key = action_key
-        self.train_mask = train_mask
+        self.val_ratio = val_ratio
+        self.max_train_episodes = max_train_episodes
+        self.seed = seed
         self.horizon = horizon
         self.pad_before = pad_before
         self.pad_after = pad_after
-
-
-        self.dtraj = 256
-        self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-        self.context_encoder = BertModel.from_pretrained("bert-base-uncased",output_hidden_states = True)
-        self.dbert = 768
-        self.set_context_lookup()
-
-
-    def set_context_lookup(self):
-        self.context_lookup = {}
-        text_label = 'right'
-        tokenized_inputs = self.tokenizer(text_label, padding=True, truncation=True, return_tensors="pt")
-        with torch.no_grad(): 
-            outputs = self.context_encoder(**tokenized_inputs)
-        embeddings = outputs.last_hidden_state[:, 0, :]
-        # store the embeddings
-        self.context_lookup[text_label] = embeddings[0].cpu().numpy()
-
-        text_label = 'left'
-        tokenized_inputs = self.tokenizer(text_label, padding=True, truncation=True, return_tensors="pt")
-        with torch.no_grad():
-            outputs = self.context_encoder(**tokenized_inputs)
-        embeddings = outputs.last_hidden_state[:, 0, :]
-        # store the embeddings
-        self.context_lookup[text_label] = embeddings[0].cpu().numpy()
+        self.obs_key = obs_key
+        self.state_key = state_key
+        self.action_key = action_key
 
         
+
+
+    def set_subset(self, episode_idxs):
+        # create copy of replay buffer
+        self.replay_buffer = copy.deepcopy(self.original_replay_buffer)
+        list_to_include = []
+        for ep_idx in range(self.original_replay_buffer.n_episodes):
+            if ep_idx in episode_idxs:
+                list_to_include.append(ep_idx)
+        self.replay_buffer.include_only_episode_indices(list_to_include)
+        # pdb.set_trace()
+        self.initialize_after_subset()
+        
+
+    def initialize_after_subset(self):
+        val_mask = get_val_mask(
+            n_episodes=self.replay_buffer.n_episodes, 
+            val_ratio=self.val_ratio,
+            seed=self.seed)
+        train_mask = ~val_mask
+        train_mask = downsample_mask(
+            mask=train_mask, 
+            max_n=self.max_train_episodes, 
+            seed=self.seed)
+
+        self.sampler = SequenceSampler(
+            replay_buffer=self.replay_buffer, 
+            sequence_length=self.horizon,
+            pad_before=self.pad_before, 
+            pad_after=self.pad_after,
+            episode_mask=train_mask
+            )
+        self.obs_key = self.obs_key
+        self.state_key = self.state_key
+        self.action_key = self.action_key
+        self.train_mask = train_mask
+        self.horizon = self.horizon
+        self.pad_before = self.pad_before
+        self.pad_after = self.pad_after
+
 
     def get_validation_dataset(self):
         val_set = copy.copy(self)
@@ -103,6 +100,16 @@ class Push2dLowdimDataset(BaseLowdimDataset):
         # pdb.set_trace()
         normalizer.fit(data=data, last_n_dims=1, mode=mode, **kwargs)
         return normalizer
+    
+    def get_combined_normalizer(self, recovery_dataset):
+        data = self._sample_to_data(self.replay_buffer)
+        recovery_data = recovery_dataset._sample_to_data(recovery_dataset.replay_buffer)
+        data['obs'] = np.concatenate([data['obs'], recovery_data['obs']], axis=0)
+        data['action'] = np.concatenate([data['action'], recovery_data['action']], axis=0)
+        normalizer = LinearNormalizer()
+        normalizer.fit(data=data, last_n_dims=1, mode='limits')
+        return normalizer
+
 
     def get_all_actions(self) -> torch.Tensor:
         return torch.from_numpy(self.replay_buffer[self.action_key])
@@ -111,44 +118,25 @@ class Push2dLowdimDataset(BaseLowdimDataset):
         return len(self.sampler)
 
     def _sample_to_data(self, sample):
+        # print("sample", sample)
         keypoint = sample[self.obs_key]
         state = sample[self.state_key]
         agent_pos = state[:,:2]
         obs = np.concatenate([
             keypoint.reshape(keypoint.shape[0], -1), 
             agent_pos], axis=-1)
-        
-        
-        # get conditioning context for demo idx
-        if 'idx' not in sample:
-            trajectory_idx = self.replay_buffer.get_episode_idxs()
-        else:
-            trajectory_idx = sample['idx']
-
-        conditioning_context = np.zeros((trajectory_idx.shape[0], self.dtraj))
-        for i in range(trajectory_idx.shape[0]):
-            conditioning_context[i] = np.ones(self.dtraj) * trajectory_idx[i]
-
-        # get language conditioning for demo idx
-        evenodd_input = trajectory_idx % 2
-        lang_conditioning_context = np.zeros((trajectory_idx.shape[0], self.dbert))
-        for i in range(trajectory_idx.shape[0]):
-            if evenodd_input[i] % 2 == 0:
-                text_label = 'right'
-            else:
-                text_label = 'left'
-            lang_conditioning_context[i] = self.context_lookup[text_label]
 
         data = {
             'obs': obs, # T, D_o
             'action': sample[self.action_key], # T, D_a
-            # 'idx': conditioning_context, # scalar
-            'utterance': lang_conditioning_context
         }
         return data
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+        # print("idx", idx)
+        # pdb.set_trace()
         sample = self.sampler.sample_sequence(idx)
+        
         
         # print("idx", idx)
         

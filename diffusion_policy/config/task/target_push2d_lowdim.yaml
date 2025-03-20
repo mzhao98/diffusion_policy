@@ -8,7 +8,7 @@ env_runner:
   _target_: diffusion_policy.env_runner.push2d_keypoints_runner_w_langtraj.Push2dKeypointsRunner
   keypoint_visible_rate: ${keypoint_visible_rate}
   n_train: 6
-  n_train_vis: 2
+  n_train_vis: 6
   train_start_seed: 0
   n_test: 2
   n_test_vis: 2
@@ -25,12 +25,14 @@ env_runner:
 
 dataset:
   _target_: diffusion_policy.dataset.push2d_finetune_dataset_langtraj_idx.Push2dLowdimDataset
-  # train_zarr_path: diffusion_policy/data/push2d/lang_bimodal_push2d.zarr
-  train_zarr_path: diffusion_policy/data/push2d/one_ood_bimodal_push2d.zarr
+  train_zarr_path: diffusion_policy/data/push2d/bimodal_50_push2d.zarr
+  # train_zarr_path: diffusion_policy/data/push2d/one_ood_bimodal_push2d.zarr
   # target_zarr_path: diffusion_policy/data/push2d/target_single_push2d.zarr
+  # target_zarr_path: diffusion_policy/data/push2d/target_ten_push2d.zarr
+  target_zarr_path: diffusion_policy/data/push2d/comp_multiple_push2d.zarr
   # target_zarr_path: diffusion_policy/data/push2d/indist_target_single_push2d.zarr
   # target_zarr_path: diffusion_policy/data/push2d/circle_target_single_push2d.zarr
-  target_zarr_path: diffusion_policy/data/push2d/one_recovery_bimodal_push2d.zarr
+  # target_zarr_path: diffusion_policy/data/push2d/one_recovery_bimodal_push2d.zarr
   
   # zarr_path: diffusion_policy/data/push2d/small_bimodal_push2d.zarr
   # zarr_path: diffusion_policy/data/push2d/test_eachmode_push2d.zarr

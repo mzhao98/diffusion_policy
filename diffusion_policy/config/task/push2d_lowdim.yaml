@@ -25,8 +25,8 @@ env_runner:
 
 dataset:
   _target_: diffusion_policy.dataset.push2d_dataset_langtraj_idx.Push2dLowdimDataset
-  # zarr_path: diffusion_policy/data/push2d/lang_bimodal_push2d.zarr
-  zarr_path: diffusion_policy/data/push2d/one_ood_bimodal_push2d.zarr
+  zarr_path: diffusion_policy/data/push2d/lang_bimodal_push2d.zarr
+  # zarr_path: diffusion_policy/data/push2d/bimodal30_push2d.zarr
   # zarr_path: diffusion_policy/data/push2d/small_bimodal_push2d.zarr
   # zarr_path: diffusion_policy/data/push2d/test_eachmode_push2d.zarr
   horizon: ${horizon}

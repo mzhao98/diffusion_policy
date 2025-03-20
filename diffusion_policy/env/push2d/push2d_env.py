@@ -98,15 +98,36 @@ class Push2dEnv(gym.Env):
             state = np.array([
                 rs.randint(250, 252), rs.randint(50, 52), # agent pos
                 # rs.randint(100, 400), rs.randint(100, 400), # block pos
-                rs.randint(40, 42), rs.randint(40, 42),
-                # rs.randint(260, 262), rs.randint(260, 262), # block pos
-                # rs.randint(450,452), rs.randint(450, 452), # block pos
+                # rs.randint(40, 45), rs.randint(40, 45),
+                # rs.randint(250, 262), rs.randint(250, 262), # block pos
+                rs.randint(40,452), rs.randint(40, 452), # block pos
                 # np.clip(rs.normal(250, 50), 50, 400),  # block pos normal around 250
                 # np.clip(rs.normal(250, 50), 50, 400),  # block pos normal around 250
                 rs.randn() * 2 * np.pi - np.pi,  # block angle
                 # 0,  # block angle
                 rs.randint(50, 52), rs.randint(260, 262),  # goal pos 1
                 rs.randint(400, 402), rs.randint(260, 262)  # goal pos 2
+                ])
+        self._set_state(state)
+
+        observation = self._get_obs()
+        return observation
+    
+    def reset_with_input(self, agent_pos, block_pos, block_angle, goal_pos1, goal_pos2):
+        seed = self._seed
+        self._setup()
+        
+        # use legacy RandomState for compatibility
+        state = self.reset_to_state
+        if state is None:
+            rs = np.random.RandomState(seed=seed)
+            state = np.array([
+                agent_pos[0], agent_pos[1], # agent pos
+                block_pos[0], block_pos[1], # block pos
+                block_angle,  # block angle
+                # 0,  # block angle
+                goal_pos1[0], goal_pos1[1],  # goal pos 1
+                goal_pos2[0], goal_pos2[1]  # goal pos 2
                 ])
         self._set_state(state)
 
@@ -499,7 +520,7 @@ class Push2dEnv(gym.Env):
         self.n_contact_points = 0
 
         self.max_score = 50 * 100
-        self.success_threshold = 0.6    # 95% coverage.
+        self.success_threshold = 0.95    # 95% coverage.
 
     def _add_segment(self, a, b, radius):
         shape = pymunk.Segment(self.space.static_body, a, b, radius)

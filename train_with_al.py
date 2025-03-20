@@ -25,24 +25,20 @@ OmegaConf.register_new_resolver("eval", eval, replace=True)
 # )
 @hydra.main(
     version_base=None,
-    # config_path='diffusion_policy/config',
-    # config_name='train_diffusion_unet_lowdim_workspace.yaml'
     config_path='diffusion_policy/config',
-    config_name='online_low_dim_block_pushing_diffusion_policy_cnn.yaml'
+    config_name='train_al_diffusion_unet_lowdim_workspace.yaml'
 )
 def main(cfg: DictConfig):
     # resolve immediately so all the ${now:} resolvers
     # will use the same time.
     print("cfg", cfg)
-    
     OmegaConf.resolve(cfg)
-    # pdb.set_trace()
 
 
     cls = hydra.utils.get_class(cfg._target_)
     workspace: BaseWorkspace = cls(cfg)
-    # workspace.run()
     workspace.run_active_learning_online()
+    # workspace.run_train_unc_active_learning()
 
 if __name__ == "__main__":
     main()
